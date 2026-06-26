@@ -1,2 +1,2 @@
-open-alex-work-id-green-instead =
+zotero-openalex-green-instead =
     .label = Make It Green Instead

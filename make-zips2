@@ -9,14 +9,14 @@ VERSION=$(jq -r '.version' src/manifest.json)
 
 # Build from src directory
 cd src
-zip -r "../build/open-alex-work-id-${VERSION}.xpi" *
+zip -r "../build/zotero-openalex-${VERSION}.xpi" *
 cd ../build
 
 # Generate update manifest with hash if template exists
 TEMPLATE_FILE="../updates-${VERSION}.json.tmpl"
 if [ -f "$TEMPLATE_FILE" ]; then
-    jq ".addons[\"open-alex-work-id@example.com\"].updates[0].update_hash = \"sha256:`shasum -a 256 open-alex-work-id-${VERSION}.xpi | cut -d' ' -f1`\"" "$TEMPLATE_FILE" > "updates-${VERSION}.json"
+    jq ".addons[\"zotero-openalex@example.com\"].updates[0].update_hash = \"sha256:`shasum -a 256 zotero-openalex-${VERSION}.xpi | cut -d' ' -f1`\"" "$TEMPLATE_FILE" > "updates-${VERSION}.json"
     echo "Update manifest created: updates-${VERSION}.json"
 fi
 
-echo "Build complete! XPI file created: build/open-alex-work-id-${VERSION}.xpi"
+echo "Build complete! XPI file created: build/zotero-openalex-${VERSION}.xpi"

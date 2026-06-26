@@ -13,7 +13,7 @@ OpenAlexWorkID = {
         if (!itemMenuPopup) return;
 
         let menuItem = document.createXULElement("menuitem");
-        menuItem.setAttribute("label", "OpenAlex Work ID");
+        menuItem.setAttribute("label", "Get OpenAlex-WorkID");
         menuItem.setAttribute("id", "workid-menuitem");
         menuItem.addEventListener("command", async () => {            
             try {
@@ -59,30 +59,29 @@ OpenAlexWorkID = {
                     
                     // Add the Work ID to the 'extra' field
                     let extra = item.getField('extra') || '';
-                    if (!extra.includes(`OpenAlex Work ID:`)) {
-                        // Check if extra field contains only a DOI and replace it
-                        if (isDOIOnlyExtra(extra)) {
-                            extra += (extra ? '\n' : '') + `OpenAlex Work ID: ${workID}`;
-                        }
+                    if (!extra.includes(`OpenAlex-WorkID:`)) {
+                        // Always append the OpenAlex ID line when it is missing.
+                        const workIDLine = `OpenAlex-WorkID: ${workID}`;
+                        extra = extra ? `${extra}\n${workIDLine}` : workIDLine;
                         item.setField('extra', extra);
                         await item.saveTx(); // Save the changes to the item
                         num_items_added += 1;
                         if (num_items==1) {
-                            window.alert("OpenAlex Work ID added to 'extra' field.");
+                            window.alert("OpenAlex-WorkID added to 'extra' field.");
                         }
                     } else {
                         // Work ID already added
                         if (num_items==1) {
-                            window.alert("OpenAlex Work ID already exists for the selected item, no changes made.");
+                            window.alert("OpenAlex-WorkID already exists for the selected item, no changes made.");
                         }
                     }
                 }
                 if (num_items > 1) {
-                    window.alert(`Finished adding OpenAlex Work IDs to ${num_items} items (${num_items_added} new).`)
+                    window.alert(`Finished adding OpenAlex-WorkIDs to ${num_items} items (${num_items_added} new).`)
                 }
             } catch (error) {
-                Zotero.debug("Error adding OpenAlex Work ID:", error);
-                window.alert("An error occurred while processing the OpenAlex Work ID.");
+                Zotero.debug("Error adding OpenAlex-WorkID:", error);
+                window.alert("An error occurred while processing the OpenAlex-WorkID.");
             }
         });
         itemMenuPopup.appendChild(menuItem);

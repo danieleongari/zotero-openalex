@@ -1,1 +1,1 @@
-pref("extensions.open-alex-work-id.intensity", 100);
+pref("extensions.zotero-openalex.intensity", 100);

@@ -6,4 +6,12 @@ Currently, the Zotero item's DOI is used to identify the item in OpenAlex. If a 
 
 In the future, I plan to implement using other metadata when the DOI is missing to obtain a broader range of OpenAlex work ID's.
 
-Download the latest version of the plugin [here](https://github.com/mtillman14/open-alex-work-id/releases/latest).
+Download the latest version of the plugin [on github](https://github.com/mtillman14/zotero-openalex/releases/latest).
+
+## Development
+
+```sh
+./make-zip3
+```
+
+then find the plugin as `build/zotero-openalex-*.xpi`

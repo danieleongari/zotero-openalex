@@ -1,15 +1,15 @@
 {
 	"manifest_version": 2,
-	"name": "OpenAlex Work ID",
-	"version": "2.0",
-	"description": "Set the OpenAlex Work ID",
-	"homepage_url": "https://github.com/mtillman14/open-alex-work-id",
+	"name": "Zotero OpenAlex",
+	"version": "3.0",
+	"description": "Set the OpenAlex WorkID",
+	"homepage_url": "https://github.com/danieleongari/zotero-openalex",
 	"applications": {
 		"zotero": {
-			"id": "open-alex-work-id@example.com",
-			"update_url": "https://zotero-download.s3.amazonaws.com/tmp/open-alex-work-id/updates-2.0.json",
+			"id": "zotero-openalex@example.com",
+			"update_url": "https://zotero-download.s3.amazonaws.com/tmp/zotero-openalex/updates-2.0.json",
 			"strict_min_version": "6.999",
-			"strict_max_version": "7.0.*"
+			"strict_max_version": "9.*"
 		}
 	}
 }

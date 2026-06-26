@@ -1,0 +1,31 @@
+#!/bin/bash
+## Working on Windows Git Bash
+set -euo pipefail
+
+rm -rf build
+mkdir build
+
+# Get version from manifest.json using PowerShell instead of jq
+VERSION=$(powershell.exe -NoProfile -Command "(Get-Content 'src/manifest.json' -Raw | ConvertFrom-Json).version" | tr -d '\r')
+
+# Build from src directory
+cd src
+powershell.exe -NoProfile -Command "Get-ChildItem -Force | Compress-Archive -DestinationPath '../build/zotero-openalex-${VERSION}.zip' -Force"
+mv "../build/zotero-openalex-${VERSION}.zip" "../build/zotero-openalex-${VERSION}.xpi"
+cd ../build
+
+# Generate update manifest with hash if template exists
+TEMPLATE_FILE="../updates-${VERSION}.json.tmpl"
+if [ -f "$TEMPLATE_FILE" ]; then
+    HASH=$(shasum -a 256 "zotero-openalex-${VERSION}.xpi" | cut -d' ' -f1)
+
+    powershell.exe -NoProfile -Command "\
+        \$json = Get-Content '$TEMPLATE_FILE' -Raw | ConvertFrom-Json; \
+        \$json.addons.'zotero-openalex@example.com'.updates[0].update_hash = 'sha256:$HASH'; \
+        \$json | ConvertTo-Json -Depth 20 \
+    " > "updates-${VERSION}.json"
+
+    echo "Update manifest created: updates-${VERSION}.json"
+fi
+
+echo "Build complete! XPI file created: build/zotero-openalex-${VERSION}.xpi"
