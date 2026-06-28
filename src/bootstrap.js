@@ -2,15 +2,29 @@ function install() {}
 function uninstall() {}
 
 async function startup({ id, version, rootURI }) {
-    Zotero.PreferencePanes.register({
-        pluginID: 'zotero-openalex@example.com',
-        src: rootURI + 'preferences.xhtml',
-        scripts: [rootURI + 'preferences.js']
-    });
+    try {
+        Zotero.PreferencePanes.register({
+            pluginID: 'zotero-openalex@example.com',
+            src: rootURI + 'preferences.xhtml',
+            scripts: [rootURI + 'preferences.js']
+        });
+    } catch (error) {
+        Zotero.debug('OpenAlex: preference pane registration skipped.');
+        Zotero.debug(error);
+    }
+
     Services.scriptloader.loadSubScript(rootURI + 'zotero-openalex.js');
     OpenAlexWorkID.init({ id, version, rootURI });
     OpenAlexWorkID.addToAllWindows();
-    await OpenAlexWorkID.main();
+    void OpenAlexWorkID.main().catch((error) => {
+        Zotero.debug('OpenAlex: startup main failed.');
+        Zotero.debug(error);
+        try {
+            Zotero.alert(null, 'OpenAlex', 'Plugin startup failed. Check Zotero debug output.');
+        } catch (_innerError) {
+            // Ignore alert failures.
+        }
+    });
 }
 
 function shutdown() {
