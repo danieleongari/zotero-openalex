@@ -10,6 +10,7 @@ const CITATION_PREFIX = "Citations:";
 const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
+const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[\-._;()/:A-Z0-9]+\b/i;
 const WORK_ID_LINE_PATTERN = /^openalex\.work_id:\s*(W\d+)\s*$/i;
@@ -648,26 +649,48 @@ function getNumberPref(key, fallback) {
     }
 }
 
+function getOpenAlexAPIKey() {
+    try {
+        return Zotero.Prefs.get(OPENALEX_API_KEY_PREF, true) || "";
+    } catch (_error) {
+        return "";
+    }
+}
+
+function buildOpenAlexParams(initialValues = {}) {
+    const params = new URLSearchParams({
+        select: "id,cited_by_count",
+        ...initialValues,
+    });
+
+    const apiKey = String(getOpenAlexAPIKey()).trim();
+    if (apiKey) {
+        params.set("api_key", apiKey);
+    }
+
+    return params;
+}
+
 async function fetchOpenAlexWorkByDOI(doi) {
     const normalizedDOI = normalizeDOI(doi);
     if (!normalizedDOI) {
         return null;
     }
 
-    const encodedDOI = encodeURIComponent(`https://doi.org/${normalizedDOI}`);
-    const url = `${OPENALEX_BASE_URL}/works/${encodedDOI}?select=id,cited_by_count`;
+    const params = buildOpenAlexParams();
+    const encodedDOI = encodeURIComponent(`doi:${normalizedDOI}`);
+    const url = `${OPENALEX_BASE_URL}/works/${encodedDOI}?${params.toString()}`;
     const byPath = await requestOpenAlexJSON(url);
     if (byPath?.id) {
         return byPath;
     }
 
     // Fallback path for environments where the DOI-path endpoint is blocked or normalized differently.
-    const params = new URLSearchParams({
+    const fallbackParams = buildOpenAlexParams({
         filter: `doi:${normalizedDOI}`,
-        select: "id,cited_by_count",
         "per-page": "1",
     });
-    const byFilter = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/works?${params.toString()}`);
+    const byFilter = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/works?${fallbackParams.toString()}`);
     if (byFilter?.results && Array.isArray(byFilter.results) && byFilter.results.length > 0) {
         return byFilter.results[0];
     }
@@ -681,7 +704,8 @@ async function fetchOpenAlexWorkByID(workID) {
         return null;
     }
 
-    const url = `${OPENALEX_BASE_URL}/works/${normalizedWorkID}?select=id,cited_by_count`;
+    const params = buildOpenAlexParams();
+    const url = `${OPENALEX_BASE_URL}/works/${normalizedWorkID}?${params.toString()}`;
     return requestOpenAlexJSON(url);
 }
 
@@ -705,14 +729,18 @@ async function requestOpenAlexJSON(url) {
                 // Keep empty body message.
             }
 
-            const nonOkMessage = bodyMessage || `HTTP ${response?.status || "unknown"}`;
-            setOpenAlexLastError(nonOkMessage);
-            Zotero.debug(`OpenAlex fetch non-OK status for ${url}: ${nonOkMessage}`);
+            const status = response?.status || 0;
+            if (status === 401 || status === 403) {
+                setOpenAlexLastError("OpenAlex rejected the request (401/403). Your API key may be invalid.");
+            } else {
+                const nonOkMessage = bodyMessage || `HTTP ${status || "unknown"}`;
+                setOpenAlexLastError(nonOkMessage);
+            }
+            Zotero.debug(`OpenAlex fetch returned non-OK status ${status || "unknown"}.`);
         }
-    } catch (fetchError) {
-        setOpenAlexLastError(fetchError?.message || "network error");
-        Zotero.debug(`OpenAlex fetch failed: ${url}`);
-        Zotero.debug(fetchError);
+    } catch (_fetchError) {
+        setOpenAlexLastError("network error");
+        Zotero.debug("OpenAlex fetch failed.");
     }
 
     try {
@@ -725,10 +753,14 @@ async function requestOpenAlexJSON(url) {
             return JSON.parse(xhr.responseText || "{}");
         }
     } catch (xhrError) {
-        const status = xhrError?.status ? `HTTP ${xhrError.status}` : "request failed";
-        setOpenAlexLastError(xhrError?.message || status);
-        Zotero.debug(`OpenAlex HTTP request failed: ${url}`);
-        Zotero.debug(xhrError);
+        const status = Number.parseInt(String(xhrError?.status || 0), 10);
+        if (status === 401 || status === 403) {
+            setOpenAlexLastError("OpenAlex rejected the request (401/403). Your API key may be invalid.");
+        } else {
+            const statusMessage = status ? `HTTP ${status}` : "request failed";
+            setOpenAlexLastError(statusMessage);
+        }
+        Zotero.debug("OpenAlex HTTP request failed.");
     }
 
     return null;

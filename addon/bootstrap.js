@@ -6,7 +6,9 @@ async function startup({ id, version, rootURI }) {
         Zotero.PreferencePanes.register({
             pluginID: 'zotero-openalex@example.com',
             src: rootURI + 'preferences.xhtml',
-            scripts: [rootURI + 'preferences.js']
+            scripts: [rootURI + 'preferences.js'],
+            label: 'Zotero OpenAlex',
+            image: rootURI + 'content/icons/openalex.svg'
         });
     } catch (error) {
         Zotero.debug('OpenAlex: preference pane registration skipped.');
