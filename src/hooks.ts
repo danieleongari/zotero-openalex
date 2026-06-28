@@ -22,8 +22,6 @@ async function onStartup() {
     rootURI,
   });
 
-  openAlexWorkID.addToAllWindows();
-
   try {
     await openAlexWorkID.main();
   } catch (error) {
@@ -44,6 +42,7 @@ async function onMainWindowUnload(win: _ZoteroTypes.MainWindow) {
 
 async function onShutdown() {
   openAlexWorkID.removeFromAllWindows();
+  openAlexWorkID.unregisterCitationColumn();
   addon.data.alive = false;
   delete (Zotero as any)[addon.data.config.addonInstance];
 }

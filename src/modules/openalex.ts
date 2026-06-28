@@ -31,6 +31,7 @@ interface OpenAlexWork {
 
 let startupSyncInProgress = false;
 let citationColumnRegistered = false;
+let citationColumnRegistrationToken: string | null = null;
 let startupInfoWindow: any = null;
 let startupInfoUsesLineAPI = false;
 let openAlexLastErrorMessage = "";
@@ -39,6 +40,14 @@ class OpenAlexWorkIDClass {
   private id = "";
   private version = "";
   private rootURI = "";
+  private windowCleanup = new WeakMap<
+    Window,
+    {
+      onPopupShowing?: () => void;
+      onCommand?: () => void;
+      onSyncCommand?: () => void;
+    }
+  >();
 
   init({ id, version, rootURI }: { id: string; version: string; rootURI: string }) {
     this.id = id;
@@ -51,15 +60,14 @@ class OpenAlexWorkIDClass {
     const itemMenuPopup = doc.querySelector("#zotero-itemmenu");
     if (!itemMenuPopup) return;
 
+    this.removeFromWindow(window);
+
     let menuItem = doc.getElementById("workid-menuitem");
-    if (menuItem) {
-      menuItem.remove();
-    }
 
     menuItem = doc.createXULElement("menuitem");
     menuItem.setAttribute("label", "Get OpenAlex-WorkID");
     menuItem.setAttribute("id", "workid-menuitem");
-    menuItem.addEventListener("command", async () => {
+    const onCommand = async () => {
       try {
         await this.updateSelectedItems(window);
       } catch (error) {
@@ -67,45 +75,73 @@ class OpenAlexWorkIDClass {
         Zotero.debug(error);
         window.alert("An error occurred while processing OpenAlex metadata.");
       }
-    });
+    };
+    menuItem.addEventListener("command", onCommand);
 
     itemMenuPopup.appendChild(menuItem);
 
-    itemMenuPopup.addEventListener("popupshowing", () => {
+    const onPopupShowing = () => {
       const pane = Zotero.getActiveZoteroPane();
       const selectedItems = pane ? pane.getSelectedItems() : [];
       (menuItem as any).hidden = selectedItems.length === 0;
-    });
+    };
+    itemMenuPopup.addEventListener("popupshowing", onPopupShowing);
 
-    this.addToolsSyncMenu(window);
+    const onSyncCommand = this.addToolsSyncMenu(window);
+
+    this.windowCleanup.set(window, {
+      onPopupShowing,
+      onCommand,
+      onSyncCommand,
+    });
   }
 
   addToolsSyncMenu(window: Window) {
     const doc = window.document;
     const toolsPopup = doc.getElementById("menu_ToolsPopup");
-    if (!toolsPopup) return;
+    if (!toolsPopup) return undefined;
 
     let syncMenuItem = doc.getElementById(TOOLS_SYNC_MENU_ID);
-    if (syncMenuItem) {
-      syncMenuItem.remove();
-    }
 
     syncMenuItem = doc.createXULElement("menuitem");
     syncMenuItem.setAttribute("id", TOOLS_SYNC_MENU_ID);
     syncMenuItem.setAttribute("label", "Run OpenAlex Startup Sync");
-    syncMenuItem.addEventListener("command", () => {
+    const onSyncCommand = () => {
       void this.runStartupSync({ forceRun: true, showSummary: true, source: "manual" });
-    });
+    };
+    syncMenuItem.addEventListener("command", onSyncCommand);
     toolsPopup.appendChild(syncMenuItem);
+
+    return onSyncCommand;
   }
 
   removeFromWindow(window: Window) {
     const doc = window.document;
+    const cleanup = this.windowCleanup.get(window);
+
     const menuItem = doc.getElementById("workid-menuitem");
-    if (menuItem) menuItem.remove();
+    if (menuItem && cleanup?.onCommand) {
+      menuItem.removeEventListener("command", cleanup.onCommand);
+    }
+
+    const itemMenuPopup = doc.querySelector("#zotero-itemmenu");
+    if (itemMenuPopup && cleanup?.onPopupShowing) {
+      itemMenuPopup.removeEventListener("popupshowing", cleanup.onPopupShowing);
+    }
+
+    if (menuItem) {
+      menuItem.remove();
+    }
 
     const toolsMenuItem = doc.getElementById(TOOLS_SYNC_MENU_ID);
-    if (toolsMenuItem) toolsMenuItem.remove();
+    if (toolsMenuItem && cleanup?.onSyncCommand) {
+      toolsMenuItem.removeEventListener("command", cleanup.onSyncCommand);
+    }
+    if (toolsMenuItem) {
+      toolsMenuItem.remove();
+    }
+
+    this.windowCleanup.delete(window);
   }
 
   addToAllWindows() {
@@ -133,7 +169,7 @@ class OpenAlexWorkIDClass {
     }
 
     try {
-      (Zotero.ItemTreeManager as any).registerColumn({
+      citationColumnRegistrationToken = (Zotero.ItemTreeManager as any).registerColumn({
         pluginID: "zotero-openalex@example.com",
         dataKey: COLUMN_DATA_KEY,
         label: COLUMN_LABEL,
@@ -160,6 +196,31 @@ class OpenAlexWorkIDClass {
     } catch (error) {
       Zotero.debug("OpenAlex: failed to register Citations column");
       Zotero.debug(error);
+    }
+  }
+
+  unregisterCitationColumn() {
+    if (!citationColumnRegistered) {
+      return;
+    }
+
+    const manager = Zotero.ItemTreeManager as any;
+    if (!manager || typeof manager.unregisterColumn !== "function") {
+      citationColumnRegistered = false;
+      citationColumnRegistrationToken = null;
+      return;
+    }
+
+    try {
+      if (citationColumnRegistrationToken) {
+        manager.unregisterColumn(citationColumnRegistrationToken);
+      }
+    } catch (error) {
+      Zotero.debug("OpenAlex: failed to unregister Citations column");
+      Zotero.debug(error);
+    } finally {
+      citationColumnRegistered = false;
+      citationColumnRegistrationToken = null;
     }
   }
 

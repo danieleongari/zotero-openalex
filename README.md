@@ -1,46 +1,150 @@
 # Zotero OpenAlex
 
-[Zotero 9](https://www.zotero.org) plugin to obtain OpenAlex metadata using the [OpenAlex](https://openalex.org) web API.
+Zotero OpenAlex is a Zotero plugin that fetches OpenAlex metadata for your items and keeps citation data up to date.
 
-Stores OpenAlex metadata in machine-readable keys in the `Extra` field:
+It stores machine-readable fields in each item's `Extra` field:
 
-`openalex.work_id: <workID>`
+- `openalex.work_id: W...`
+- `openalex.cit_count: N`
+- `openalex.cit_date: YYYY-MM-DD`
 
-`openalex.cit_count: <count>`
+Only `openalex.*` lines are parsed and managed by the plugin.
 
-`openalex.cit_date: <YYYY-MM-DD>`
+## Compatibility
 
-Only the machine-readable `openalex.*` lines are parsed.
+- Zotero strict minimum version: `6.999`
+- Zotero strict maximum version: `9.*`
 
-The plugin keeps this data updated:
+## What the plugin does
 
-- from the context-menu command `Get OpenAlex-WorkID` for selected items
-- automatically at startup for items that are missing Work ID/citation data or have stale citations
+- Adds a context-menu action (`Get OpenAlex-WorkID`) to update selected regular items.
+- Runs optional startup synchronization to refresh missing/stale OpenAlex metadata.
+- Adds a `Citations` column in the Zotero items table.
+- Uses DOI-based lookup against the OpenAlex API.
 
-Staleness is controlled by preferences and defaults to 3 months.
+If an item has no DOI in the DOI field, the plugin also tries DOI text found in `Extra`.
 
-Startup sync is intentionally delayed by a few seconds (`startupDelayMs`, default `3000`) so Zotero UI and database initialization can complete before the scan begins.
+## Installation (User)
 
-The plugin registers a `Citations` column in Zotero's library view. When no OpenAlex citation value is available, the column shows `-`.
+1. Download the latest `.xpi` from this repository's releases.
+2. Open Zotero.
+3. Install the `.xpi` as a plugin.
+4. Restart Zotero if requested.
 
-Currently, the Zotero item's DOI is used to identify the item in OpenAlex. If a Zotero item does not have a DOI field, you can enter its DOI in the `Extra` field.
+## Usage (User)
 
-In the future, I plan to implement using other metadata when the DOI is missing to obtain a broader range of OpenAlex work ID's.
+### Manual update
 
-## Optional OpenAlex API key
+1. Select one or more regular items in Zotero.
+2. Open the item context menu.
+3. Click `Get OpenAlex-WorkID`.
 
-Adding an OpenAlex API key is not mandatory.
+For a single item, Zotero shows a direct result message. For multiple items, Zotero shows an aggregate summary.
 
-The plugin can work without it but you can add it in the Edit > Settings > OpenAlex menu, and it allows you to retrieve more items from OpenAlex. 
+### Startup sync
 
-If you want to use one, you can register for free on OpenAlex and get your key from:
+When enabled, startup sync scans regular items and updates those that are missing metadata or have stale citation dates.
+
+## Preferences (User)
+
+Preferences are stored under `extensions.zotero-openalex.*`.
+
+- `autoUpdateOnStartup` (default `true`): enable startup sync.
+- `staleMonths` (default `3`): citation data older than this is considered stale.
+- `requestDelayMs` (default `1000`): delay between OpenAlex API calls during startup sync.
+- `startupDelayMs` (default `3000`): delay before startup sync begins after Zotero startup.
+- `showStartupSummary` (default `true`): show startup status/summary window.
+- `apiKey` (default empty): optional OpenAlex API key.
+
+## Optional API key (User)
+
+The plugin works without an API key. You can optionally set one in Zotero settings to improve request allowance.
+
+- Open Zotero settings and go to the OpenAlex pane.
+- Enter key, clear key, or test connectivity from the pane.
+
+Get an OpenAlex API key at:
 
 https://openalex.org/settings/api-key
 
-## Development
+## Metadata behavior
+
+- Existing `openalex.work_id`, `openalex.cit_count`, and `openalex.cit_date` lines are replaced when updated.
+- New lines are inserted before `Citation Key:` when present, otherwise appended.
+- Citation date is updated when citation count changes or when refresh is forced.
+
+## Privacy notes
+
+- The API key is stored in local Zotero preferences.
+- The plugin does not write your API key into item metadata.
+- Requests are sent to the OpenAlex API endpoint (`https://api.openalex.org`).
+
+## Development (Developer)
+
+This project uses TypeScript and `zotero-plugin-scaffold`.
+
+### Requirements
+
+- Node.js and npm
+- Zotero installed locally
+
+### Install dependencies
 
 ```sh
-./make-zips3
+npm install
 ```
 
-then find the plugin as `build/zotero-openalex-*.xpi`
+### Run in development mode
+
+```sh
+npm start
+```
+
+### Build
+
+```sh
+npm run build
+```
+
+### Lint and format checks
+
+```sh
+npm run lint:check
+```
+
+### Auto-fix lint/format
+
+```sh
+npm run lint:fix
+```
+
+### Tests
+
+```sh
+npm test
+```
+
+### Release
+
+```sh
+npm run release
+```
+
+## Project structure (Developer)
+
+- `src/index.ts`: plugin global binding and entry wiring.
+- `src/addon.ts`: addon state container.
+- `src/hooks.ts`: lifecycle hooks (`onStartup`, window load/unload, shutdown).
+- `src/modules/openalex.ts`: OpenAlex logic, metadata parsing/upsert, menu wiring, startup sync, citations column.
+- `addon/`: runtime assets (`manifest.json`, `bootstrap.js`, prefs/panes assets).
+- `zotero-plugin.config.ts`: scaffold build and release configuration.
+
+## Packaging note
+
+Legacy `make-zips*` scripts were removed. Packaging and release should now go through scaffold commands (`npm run build` and `npm run release`).
+
+## Troubleshooting
+
+- If API calls fail with `401/403`, verify the API key.
+- If updates are skipped, verify the item has a DOI (field or `Extra`).
+- If startup sync feels slow, increase `requestDelayMs` cautiously and adjust `staleMonths`.

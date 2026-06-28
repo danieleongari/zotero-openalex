@@ -8,7 +8,7 @@ export default defineConfig({
   id: pkg.config.addonID,
   namespace: pkg.config.addonRef,
   updateURL:
-    "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+    "https://github.com/danieleongari/zotero-openalex/releases/latest/download/update.json",
   xpiDownloadLink:
     "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
 
@@ -22,7 +22,7 @@ export default defineConfig({
       buildVersion: pkg.version,
       buildTime: "{{buildTime}}",
       updateURL:
-        "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+        "https://github.com/danieleongari/zotero-openalex/releases/latest/download/update.json",
     },
     esbuildOptions: [
       {
