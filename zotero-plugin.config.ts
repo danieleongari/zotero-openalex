@@ -1,0 +1,43 @@
+import { defineConfig } from "zotero-plugin-scaffold";
+import pkg from "./package.json";
+
+export default defineConfig({
+  source: ["src", "addon"],
+  dist: ".scaffold/build",
+  name: pkg.config.addonName,
+  id: pkg.config.addonID,
+  namespace: pkg.config.addonRef,
+  updateURL:
+    "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+  xpiDownloadLink:
+    "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+
+  build: {
+    assets: ["addon/**/*.*"],
+    define: {
+      ...pkg.config,
+      author: pkg.author,
+      description: pkg.description,
+      homepage: pkg.homepage,
+      buildVersion: pkg.version,
+      buildTime: "{{buildTime}}",
+      updateURL:
+        "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+    },
+    esbuildOptions: [
+      {
+        entryPoints: ["src/index.ts"],
+        define: {
+          __env__: '"production"',
+        },
+        bundle: true,
+        target: "firefox115",
+        outfile: `.scaffold/build/addon/content/scripts/${pkg.config.addonRef}.js`,
+      },
+    ],
+  },
+
+  test: {
+    waitForPlugin: `() => Zotero.${pkg.config.addonInstance}.data.initialized`,
+  },
+});

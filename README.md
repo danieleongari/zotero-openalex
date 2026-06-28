@@ -10,7 +10,7 @@ Stores OpenAlex metadata in machine-readable keys in the `Extra` field:
 
 `openalex.cit_date: <YYYY-MM-DD>`
 
-Legacy lines (`OpenAlex-WorkID: ...` and `Citations: ... (OpenAlex) [...]`) are still parsed and are migrated to the new format when an item is updated.
+Only the machine-readable `openalex.*` lines are parsed.
 
 The plugin keeps this data updated:
 
@@ -26,7 +26,6 @@ The plugin registers a `Citations` column in Zotero's library view. When no Open
 Currently, the Zotero item's DOI is used to identify the item in OpenAlex. If a Zotero item does not have a DOI field, you can enter its DOI in the `Extra` field.
 
 In the future, I plan to implement using other metadata when the DOI is missing to obtain a broader range of OpenAlex work ID's.
-
 
 ## Optional OpenAlex API key
 

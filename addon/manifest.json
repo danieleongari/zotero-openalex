@@ -1,17 +1,18 @@
 {
 	"manifest_version": 2,
-	"name": "Zotero OpenAlex",
-	"version": "3.5",
-	"description": "Set the OpenAlex WorkID",
-	"homepage_url": "https://github.com/danieleongari/zotero-openalex",
+	"name": "__addonName__",
+	"version": "__buildVersion__",
+	"description": "__description__",
+	"homepage_url": "__homepage__",
+	"author": "__author__",
 	"icons": {
 		"48": "content/icons/openalex.svg",
 		"96": "content/icons/openalex.svg"
 	},
 	"applications": {
 		"zotero": {
-			"id": "zotero-openalex@example.com",
-			"update_url": "https://github.com/danieleongari/zotero-openalex/releases/latest/download/zotero-openalex.xpi",
+			"id": "__addonID__",
+			"update_url": "__updateURL__",
 			"strict_min_version": "6.999",
 			"strict_max_version": "9.*"
 		}

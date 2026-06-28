@@ -1,0 +1,55 @@
+{
+  "name": "zotero-openalex",
+  "type": "module",
+  "version": "3.5.0",
+  "description": "Set the OpenAlex WorkID",
+  "config": {
+    "addonName": "Zotero OpenAlex",
+    "addonID": "zotero-openalex@example.com",
+    "addonRef": "openalex",
+    "addonInstance": "OpenAlexAddon",
+    "prefsPrefix": "extensions.zotero-openalex"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/danieleongari/zotero-openalex.git"
+  },
+  "author": "Daniele Ongari",
+  "bugs": {
+    "url": "https://github.com/danieleongari/zotero-openalex/issues"
+  },
+  "homepage": "https://github.com/danieleongari/zotero-openalex",
+  "license": "AGPL-3.0-or-later",
+  "scripts": {
+    "start": "zotero-plugin serve",
+    "build": "zotero-plugin build && tsc --noEmit",
+    "lint:check": "prettier --check . && eslint .",
+    "lint:fix": "prettier --write . && eslint . --fix",
+    "release": "zotero-plugin release",
+    "test": "zotero-plugin test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "@zotero-plugin/eslint-config": "^0.6.7",
+    "eslint": "^9.39.2",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "zotero-plugin-scaffold": "^0.8.2",
+    "zotero-types": "^4.1.0-beta.4"
+  },
+  "prettier": {
+    "printWidth": 100,
+    "tabWidth": 2,
+    "endOfLine": "lf",
+    "overrides": [
+      {
+        "files": [
+          "*.xhtml"
+        ],
+        "options": {
+          "htmlWhitespaceSensitivity": "css"
+        }
+      }
+    ]
+  }
+}
