@@ -2,21 +2,36 @@
 set -euo pipefail
 
 rm -rf build
-mkdir build
+mkdir -p build/stage
 
-# Get version from manifest.json
-VERSION=$(jq -r '.version' src/manifest.json)
+# Get version from addon/manifest.json
+VERSION=$(powershell.exe -NoProfile -Command "(Get-Content 'addon/manifest.json' -Raw | ConvertFrom-Json).version" | tr -d '\r')
+STAGE_DIR="build/stage"
 
-# Build from src directory
-cd src
-zip -r "../build/zotero-openalex-${VERSION}.xpi" *
-cd ../build
+# Build from addon directory.
+powershell.exe -NoProfile -Command "Copy-Item -Path 'addon/*' -Destination '${STAGE_DIR}' -Recurse -Force"
+
+cd "${STAGE_DIR}"
+powershell.exe -NoProfile -Command "Get-ChildItem -Force | Compress-Archive -DestinationPath '../zotero-openalex-${VERSION}.zip' -Force"
+cd ..
+mv "zotero-openalex-${VERSION}.zip" "zotero-openalex-${VERSION}.xpi"
 
 # Generate update manifest with hash if template exists
 TEMPLATE_FILE="../updates-${VERSION}.json.tmpl"
 if [ -f "$TEMPLATE_FILE" ]; then
-    jq ".addons[\"zotero-openalex@example.com\"].updates[0].update_hash = \"sha256:`shasum -a 256 zotero-openalex-${VERSION}.xpi | cut -d' ' -f1`\"" "$TEMPLATE_FILE" > "updates-${VERSION}.json"
+    HASH=$(shasum -a 256 "zotero-openalex-${VERSION}.xpi" | cut -d' ' -f1)
+
+    powershell.exe -NoProfile -Command "\
+        \$json = Get-Content '$TEMPLATE_FILE' -Raw | ConvertFrom-Json; \
+        \$json.addons.'zotero-openalex@example.com'.updates[0].update_hash = 'sha256:$HASH'; \
+        \$json | ConvertTo-Json -Depth 20 \
+    " > "updates-${VERSION}.json"
+
     echo "Update manifest created: updates-${VERSION}.json"
+else
+    echo "No update template found for version ${VERSION}; skipping updates JSON generation."
 fi
+
+rm -rf stage
 
 echo "Build complete! XPI file created: build/zotero-openalex-${VERSION}.xpi"

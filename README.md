@@ -30,7 +30,7 @@ In the future, I plan to implement using other metadata when the DOI is missing 
 ## Development
 
 ```sh
-./make-zip3
+./make-zips3
 ```
 
 then find the plugin as `build/zotero-openalex-*.xpi`

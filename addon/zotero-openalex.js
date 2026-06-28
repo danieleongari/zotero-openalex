@@ -24,6 +24,7 @@ let startupSyncInProgress = false;
 let citationColumnRegistered = false;
 let startupInfoWindow = null;
 let startupInfoUsesLineAPI = false;
+let openAlexLastErrorMessage = "";
 
 OpenAlexWorkID = {
     init({ id, version, rootURI }) {
@@ -204,6 +205,8 @@ OpenAlexWorkID = {
             return { status: "skipped", message: "Item is not a regular Zotero item." };
         }
 
+        clearOpenAlexLastError();
+
         const extra = item.getField("extra") || "";
         const current = parseOpenAlexMetadata(extra);
 
@@ -222,6 +225,10 @@ OpenAlexWorkID = {
         }
 
         if (!apiWork) {
+            const apiError = getOpenAlexLastError();
+            if (apiError) {
+                return { status: "skipped", message: `OpenAlex lookup failed: ${apiError}` };
+            }
             return { status: "skipped", message: "No matching OpenAlex Work found." };
         }
 
@@ -649,7 +656,23 @@ async function fetchOpenAlexWorkByDOI(doi) {
 
     const encodedDOI = encodeURIComponent(`https://doi.org/${normalizedDOI}`);
     const url = `${OPENALEX_BASE_URL}/works/${encodedDOI}?select=id,cited_by_count`;
-    return requestOpenAlexJSON(url);
+    const byPath = await requestOpenAlexJSON(url);
+    if (byPath?.id) {
+        return byPath;
+    }
+
+    // Fallback path for environments where the DOI-path endpoint is blocked or normalized differently.
+    const params = new URLSearchParams({
+        filter: `doi:${normalizedDOI}`,
+        select: "id,cited_by_count",
+        "per-page": "1",
+    });
+    const byFilter = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/works?${params.toString()}`);
+    if (byFilter?.results && Array.isArray(byFilter.results) && byFilter.results.length > 0) {
+        return byFilter.results[0];
+    }
+
+    return null;
 }
 
 async function fetchOpenAlexWorkByID(workID) {
@@ -663,17 +686,64 @@ async function fetchOpenAlexWorkByID(workID) {
 }
 
 async function requestOpenAlexJSON(url) {
+    // Try fetch first: on some corporate networks, fetch succeeds where lower-level HTTP requests fail TLS validation.
     try {
-        const xhr = await Zotero.HTTP.request("GET", url, {
-            headers: { Accept: "application/json" },
-            timeout: 15000,
-        });
-        return JSON.parse(xhr.responseText || "{}");
-    } catch (error) {
-        Zotero.debug(`OpenAlex request failed: ${url}`);
-        Zotero.debug(error);
-        return null;
+        if (typeof fetch === "function") {
+            const response = await fetch(url, {
+                headers: { Accept: "application/json" },
+            });
+            if (response && response.ok) {
+                clearOpenAlexLastError();
+                return await response.json();
+            }
+
+            let bodyMessage = "";
+            try {
+                const body = await response.json();
+                bodyMessage = body?.message || body?.error || "";
+            } catch (_parseError) {
+                // Keep empty body message.
+            }
+
+            const nonOkMessage = bodyMessage || `HTTP ${response?.status || "unknown"}`;
+            setOpenAlexLastError(nonOkMessage);
+            Zotero.debug(`OpenAlex fetch non-OK status for ${url}: ${nonOkMessage}`);
+        }
+    } catch (fetchError) {
+        setOpenAlexLastError(fetchError?.message || "network error");
+        Zotero.debug(`OpenAlex fetch failed: ${url}`);
+        Zotero.debug(fetchError);
     }
+
+    try {
+        if (Zotero.HTTP && typeof Zotero.HTTP.request === "function") {
+            const xhr = await Zotero.HTTP.request("GET", url, {
+                headers: { Accept: "application/json" },
+                timeout: 15000,
+            });
+            clearOpenAlexLastError();
+            return JSON.parse(xhr.responseText || "{}");
+        }
+    } catch (xhrError) {
+        const status = xhrError?.status ? `HTTP ${xhrError.status}` : "request failed";
+        setOpenAlexLastError(xhrError?.message || status);
+        Zotero.debug(`OpenAlex HTTP request failed: ${url}`);
+        Zotero.debug(xhrError);
+    }
+
+    return null;
+}
+
+function clearOpenAlexLastError() {
+    openAlexLastErrorMessage = "";
+}
+
+function setOpenAlexLastError(message) {
+    openAlexLastErrorMessage = String(message || "").trim();
+}
+
+function getOpenAlexLastError() {
+    return openAlexLastErrorMessage;
 }
 
 function delay(milliseconds) {

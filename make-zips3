@@ -3,16 +3,19 @@
 set -euo pipefail
 
 rm -rf build
-mkdir build
+mkdir -p build/stage
 
-# Get version from manifest.json using PowerShell instead of jq
-VERSION=$(powershell.exe -NoProfile -Command "(Get-Content 'src/manifest.json' -Raw | ConvertFrom-Json).version" | tr -d '\r')
+# Get version from addon/manifest.json using PowerShell instead of jq
+VERSION=$(powershell.exe -NoProfile -Command "(Get-Content 'addon/manifest.json' -Raw | ConvertFrom-Json).version" | tr -d '\r')
+STAGE_DIR="build/stage"
 
-# Build from src directory
-cd src
-powershell.exe -NoProfile -Command "Get-ChildItem -Force | Compress-Archive -DestinationPath '../build/zotero-openalex-${VERSION}.zip' -Force"
-mv "../build/zotero-openalex-${VERSION}.zip" "../build/zotero-openalex-${VERSION}.xpi"
-cd ../build
+# Build a standard addon-root package in a staging directory.
+powershell.exe -NoProfile -Command "Copy-Item -Path 'addon/*' -Destination '${STAGE_DIR}' -Recurse -Force"
+
+cd "${STAGE_DIR}"
+powershell.exe -NoProfile -Command "Get-ChildItem -Force | Compress-Archive -DestinationPath '../zotero-openalex-${VERSION}.zip' -Force"
+cd ..
+mv "zotero-openalex-${VERSION}.zip" "zotero-openalex-${VERSION}.xpi"
 
 # Generate update manifest with hash if template exists
 TEMPLATE_FILE="../updates-${VERSION}.json.tmpl"
@@ -26,6 +29,10 @@ if [ -f "$TEMPLATE_FILE" ]; then
     " > "updates-${VERSION}.json"
 
     echo "Update manifest created: updates-${VERSION}.json"
+else
+    echo "No update template found for version ${VERSION}; skipping updates JSON generation."
 fi
+
+rm -rf stage
 
 echo "Build complete! XPI file created: build/zotero-openalex-${VERSION}.xpi"
