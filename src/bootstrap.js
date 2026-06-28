@@ -19,11 +19,6 @@ async function startup({ id, version, rootURI }) {
     void OpenAlexWorkID.main().catch((error) => {
         Zotero.debug('OpenAlex: startup main failed.');
         Zotero.debug(error);
-        try {
-            Zotero.alert(null, 'OpenAlex', 'Plugin startup failed. Check Zotero debug output.');
-        } catch (_innerError) {
-            // Ignore alert failures.
-        }
     });
 }
 

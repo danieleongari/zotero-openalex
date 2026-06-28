@@ -2,11 +2,15 @@
 
 [Zotero 9](https://www.zotero.org) plugin to obtain OpenAlex metadata using the [OpenAlex](https://openalex.org) web API.
 
-Stores the OpenAlex Work ID in the `Extra` field with the format `OpenAlex-WorkID: <workID>`.
+Stores OpenAlex metadata in machine-readable keys in the `Extra` field:
 
-Also stores OpenAlex citation counts in `Extra` using:
+`openalex.work_id: <workID>`
 
-`Citations: <count> (OpenAlex) [YYYY-MM-DD]`
+`openalex.cit_count: <count>`
+
+`openalex.cit_date: <YYYY-MM-DD>`
+
+Legacy lines (`OpenAlex-WorkID: ...` and `Citations: ... (OpenAlex) [...]`) are still parsed and are migrated to the new format when an item is updated.
 
 The plugin keeps this data updated:
 
