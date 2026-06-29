@@ -45,27 +45,28 @@ For a single item, Zotero shows a direct result message. For multiple items, Zot
 
 When enabled, startup sync scans regular items and updates those that are missing metadata or have stale citation dates.
 
-### Usage: Preferences (User)
+### Usage: Custom Settings
 
-Preferences are stored under `extensions.zotero-openalex.*`.
+These settings could be customized in the Settings panel of Zotero dedicated to the plugin (in Windows: Edit > Settings):
 
-Most of these could be customized in the Settings panel of Zotero dedicated to the plugin (in Windows: Edit > Settings).
+- `apiKey` (default empty): optional OpenAlex API key.
+- `autoUpdateOnStartup` (default `true`): check items for updates at startup.
+- `staleMonths` (default `3`): months after which the number of citations is updated.
+- `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
 
-- `autoUpdateOnStartup` (default `true`): enable startup sync.
-- `staleMonths` (default `3`): citation data older than this is considered stale.
+These other settings are just in `extensions.zotero-openalex.*`:
+
 - `requestDelayMs` (default `1000`): delay between OpenAlex API calls during startup sync.
 - `startupDelayMs` (default `3000`): delay before startup sync begins after Zotero startup.
 - `showStartupSummary` (default `true`): show startup status/summary window.
-- `apiKey` (default empty): optional OpenAlex API key.
-- `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
 
-### Usage: Optional API key (User)
+### Usage: Optional API key
 
 The plugin works without an API key. You can optionally set one in Zotero settings to improve request allowance.
 
 Get an OpenAlex API key at:
 
-https://openalex.org/settings/api-key
+[https://openalex.org/settings/api-key](https://openalex.org/settings/api-key)
 
 ## Metadata behavior
 

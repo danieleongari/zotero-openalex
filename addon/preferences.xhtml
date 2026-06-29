@@ -3,6 +3,7 @@
     
 
     <label value="OpenAlex API key" />
+
     <html:input
       id="openalex-api-key-input"
       type="password"
@@ -10,6 +11,7 @@
       style="width: 32em; max-width: 100%"
     />
     <description> Stored locally in Zotero preferences. Not written to Zotero items. </description>
+
     <hbox align="center">
       <button id="openalex-api-key-clear" label="Clear" />
       <button id="openalex-api-key-test" label="Test connection" />
@@ -17,6 +19,20 @@
     <description id="openalex-api-key-status" style="min-height: 1.4em" />
 
     <h2>Custom Settings</h2>
+
+    <checkbox id="auto-update-on-startup" label="Check items for updates at startup" />
+
+    <hbox align="center">
+      <label value="Months after which the number of citations is updated:" />
+      <html:input
+        id="stale-months"
+        type="number"
+        min="1"
+        max="36"
+        style="width: 4em; max-width: 100%; margin-inline-start: 0.5em"
+      />
+    </hbox>
+    
     <checkbox id="openalex-correct-arxiv" label="Correct arXiv articles: change 'Item Type' to 'preprint' and set DOI if missing" />
 
   </groupbox>
