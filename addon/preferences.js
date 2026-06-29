@@ -1,125 +1,137 @@
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
+const OPENALEX_CORRECT_ARXIV_PREF = "extensions.zotero-openalex.correctArxivArticles";
 const OPENALEX_TEST_WORK_PATH = "doi%3A10.7717%2Fpeerj.4375";
 let openAlexPaneInitialized = false;
 
 function setAPIStatus(message, isError = false) {
-    const statusEl = document.getElementById("openalex-api-key-status");
-    if (!statusEl) {
-        return;
-    }
+  const statusEl = document.getElementById("openalex-api-key-status");
+  if (!statusEl) {
+    return;
+  }
 
-    statusEl.textContent = message || "";
-    statusEl.style.color = isError ? "#b3261e" : "";
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#b3261e" : "";
 }
 
 function saveAPIKeyValue(inputEl) {
-    const value = String(inputEl?.value || "").trim();
-    Zotero.Prefs.set(OPENALEX_API_KEY_PREF, value, true);
+  const value = String(inputEl?.value || "").trim();
+  Zotero.Prefs.set(OPENALEX_API_KEY_PREF, value, true);
 }
 
 async function requestOpenAlexTest(url) {
-    if (typeof fetch === "function") {
-        try {
-            const response = await fetch(url, {
-                headers: { Accept: "application/json" },
-            });
-            return { ok: response.ok, status: response.status || 0 };
-        } catch (_error) {
-            // Fall through to Zotero.HTTP.
-        }
+  if (typeof fetch === "function") {
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+      });
+      return { ok: response.ok, status: response.status || 0 };
+    } catch (_error) {
+      // Fall through to Zotero.HTTP.
     }
+  }
 
-    if (Zotero.HTTP && typeof Zotero.HTTP.request === "function") {
-        try {
-            const xhr = await Zotero.HTTP.request("GET", url, {
-                headers: { Accept: "application/json" },
-                timeout: 15000,
-                successCodes: false,
-            });
-            const status = xhr?.status || 0;
-            return { ok: status >= 200 && status < 300, status };
-        } catch (error) {
-            return { ok: false, status: error?.status || 0 };
-        }
+  if (Zotero.HTTP && typeof Zotero.HTTP.request === "function") {
+    try {
+      const xhr = await Zotero.HTTP.request("GET", url, {
+        headers: { Accept: "application/json" },
+        timeout: 15000,
+        successCodes: false,
+      });
+      const status = xhr?.status || 0;
+      return { ok: status >= 200 && status < 300, status };
+    } catch (error) {
+      return { ok: false, status: error?.status || 0 };
     }
+  }
 
-    return { ok: false, status: 0 };
+  return { ok: false, status: 0 };
 }
 
 async function testAPIConnection(inputEl, testBtn) {
-    saveAPIKeyValue(inputEl);
-    const apiKey = String(inputEl?.value || "").trim();
+  saveAPIKeyValue(inputEl);
+  const apiKey = String(inputEl?.value || "").trim();
 
-    const params = new URLSearchParams({
-        select: "id,cited_by_count",
-    });
-    if (apiKey) {
-        params.set("api_key", apiKey);
+  const params = new URLSearchParams({
+    select: "id,cited_by_count",
+  });
+  if (apiKey) {
+    params.set("api_key", apiKey);
+  }
+
+  const url = `https://api.openalex.org/works/${OPENALEX_TEST_WORK_PATH}?${params.toString()}`;
+  setAPIStatus("Testing OpenAlex connection...");
+  testBtn.disabled = true;
+
+  try {
+    const result = await requestOpenAlexTest(url);
+    if (result.ok) {
+      setAPIStatus("OpenAlex connection successful.", false);
+      return;
     }
 
-    const url = `https://api.openalex.org/works/${OPENALEX_TEST_WORK_PATH}?${params.toString()}`;
-    setAPIStatus("Testing OpenAlex connection...");
-    testBtn.disabled = true;
-
-    try {
-        const result = await requestOpenAlexTest(url);
-        if (result.ok) {
-            setAPIStatus("OpenAlex connection successful.", false);
-            return;
-        }
-
-        if (result.status === 401 || result.status === 403) {
-            setAPIStatus("OpenAlex rejected the request (401/403). Your API key may be invalid.", true);
-            return;
-        }
-
-        const detail = result.status ? `HTTP ${result.status}` : "network error";
-        setAPIStatus(`OpenAlex connection failed (${detail}).`, true);
-    } finally {
-        testBtn.disabled = false;
+    if (result.status === 401 || result.status === 403) {
+      setAPIStatus("OpenAlex rejected the request (401/403). Your API key may be invalid.", true);
+      return;
     }
+
+    const detail = result.status ? `HTTP ${result.status}` : "network error";
+    setAPIStatus(`OpenAlex connection failed (${detail}).`, true);
+  } finally {
+    testBtn.disabled = false;
+  }
 }
 
 function initOpenAlexPreferencesPane() {
-    const inputEl = document.getElementById("openalex-api-key-input");
-    const clearBtn = document.getElementById("openalex-api-key-clear");
-    const testBtn = document.getElementById("openalex-api-key-test");
-    if (!inputEl || !clearBtn || !testBtn) {
-        return;
-    }
+  const arxivCheckbox = document.getElementById("openalex-correct-arxiv");
+  const inputEl = document.getElementById("openalex-api-key-input");
+  const clearBtn = document.getElementById("openalex-api-key-clear");
+  const testBtn = document.getElementById("openalex-api-key-test");
+  if (!arxivCheckbox || !inputEl || !clearBtn || !testBtn) {
+    return;
+  }
 
-    if (openAlexPaneInitialized) {
-        return;
-    }
-    openAlexPaneInitialized = true;
+  if (openAlexPaneInitialized) {
+    return;
+  }
+  openAlexPaneInitialized = true;
 
-    const storedValue = Zotero.Prefs.get("extensions.zotero-openalex.apiKey", true) || "";
-    inputEl.value = storedValue;
+  const storedArxivValue = Zotero.Prefs.get(OPENALEX_CORRECT_ARXIV_PREF, true);
+  arxivCheckbox.checked =
+    typeof storedArxivValue === "boolean"
+      ? storedArxivValue
+      : String(storedArxivValue).toLowerCase() !== "false";
 
-    const saveHandler = () => {
-        saveAPIKeyValue(inputEl);
-    };
+  const storedValue = Zotero.Prefs.get("extensions.zotero-openalex.apiKey", true) || "";
+  inputEl.value = storedValue;
 
-    inputEl.addEventListener("input", saveHandler);
-    inputEl.addEventListener("change", saveHandler);
+  arxivCheckbox.addEventListener("command", () => {
+    Zotero.Prefs.set(OPENALEX_CORRECT_ARXIV_PREF, Boolean(arxivCheckbox.checked), true);
+  });
 
-    clearBtn.addEventListener("command", () => {
-        Zotero.Prefs.set(OPENALEX_API_KEY_PREF, "", true);
-        inputEl.value = "";
-        setAPIStatus("OpenAlex API key cleared.");
-    });
+  const saveHandler = () => {
+    saveAPIKeyValue(inputEl);
+  };
 
-    testBtn.addEventListener("command", () => {
-        void testAPIConnection(inputEl, testBtn);
-    });
+  inputEl.addEventListener("input", saveHandler);
+  inputEl.addEventListener("change", saveHandler);
+
+  clearBtn.addEventListener("command", () => {
+    Zotero.Prefs.set(OPENALEX_API_KEY_PREF, "", true);
+    inputEl.value = "";
+    setAPIStatus("OpenAlex API key cleared.");
+  });
+
+  testBtn.addEventListener("command", () => {
+    void testAPIConnection(inputEl, testBtn);
+  });
 }
 
 if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initOpenAlexPreferencesPane, { once: true });
+  document.addEventListener("DOMContentLoaded", initOpenAlexPreferencesPane, { once: true });
 } else {
-    initOpenAlexPreferencesPane();
+  initOpenAlexPreferencesPane();
 }
 
 if (typeof window !== "undefined") {
-    window.initOpenAlexPreferencesPane = initOpenAlexPreferencesPane;
+  window.initOpenAlexPreferencesPane = initOpenAlexPreferencesPane;
 }

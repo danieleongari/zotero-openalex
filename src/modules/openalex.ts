@@ -6,8 +6,13 @@ const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
+const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[\-._;()/:A-Z0-9]+\b/i;
+const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
+const ARXIV_ID_MODERN_PATTERN = /^\d{4}\.\d{4,5}$/;
+const ARXIV_ID_LEGACY_PATTERN = /^[a-z-]+(?:\.[a-z-]+)?\/\d{7}$/i;
+const ARXIV_DOI_PREFIX = "10.48550/arXiv.";
 const WORK_ID_LINE_PATTERN = /^openalex\.work_id:\s*(W\d+)\s*$/i;
 const CIT_COUNT_LINE_PATTERN = /^openalex\.cit_count:\s*(\d+)\s*$/i;
 const CIT_DATE_LINE_PATTERN = /^openalex\.cit_date:\s*(\d{4}-\d{1,2}-\d{1,2})\s*$/i;
@@ -27,6 +32,12 @@ interface UpdateOutcome {
 interface OpenAlexWork {
   id?: string;
   cited_by_count?: number | string;
+}
+
+interface DOIResolution {
+  doi: string | null;
+  arxivDOI: string | null;
+  fromArxivURL: boolean;
 }
 
 let startupSyncInProgress = false;
@@ -163,7 +174,10 @@ class OpenAlexWorkIDClass {
       return;
     }
 
-    if (!Zotero.ItemTreeManager || typeof (Zotero.ItemTreeManager as any).registerColumn !== "function") {
+    if (
+      !Zotero.ItemTreeManager ||
+      typeof (Zotero.ItemTreeManager as any).registerColumn !== "function"
+    ) {
       Zotero.debug("OpenAlex: ItemTreeManager.registerColumn is unavailable.");
       return;
     }
@@ -184,7 +198,13 @@ class OpenAlexWorkIDClass {
           const metadata = parseOpenAlexMetadata(item.getField("extra") || "");
           return metadata.citationCount === null ? "-" : String(metadata.citationCount);
         },
-        renderCell(_index: number, data: string, column: any, _isFirstColumn: boolean, doc: Document) {
+        renderCell(
+          _index: number,
+          data: string,
+          column: any,
+          _isFirstColumn: boolean,
+          doc: Document,
+        ) {
           const span = doc.createElement("span");
           span.className = `cell ${column.className || ""}`;
           span.style.textAlign = "center";
@@ -256,7 +276,7 @@ class OpenAlexWorkIDClass {
 
       if (numItems === 1) {
         if (outcome.status === "updated") {
-          window.alert("OpenAlex-WorkID and citations updated in the Extra field.");
+          window.alert(outcome.message || "OpenAlex metadata updated.");
         } else if (outcome.status === "unchanged") {
           window.alert("OpenAlex metadata is already up to date.");
         } else {
@@ -272,7 +292,10 @@ class OpenAlexWorkIDClass {
     }
   }
 
-  async updateSingleItem(item: Zotero.Item, { refreshCitationDate = false } = {}): Promise<UpdateOutcome> {
+  async updateSingleItem(
+    item: Zotero.Item,
+    { refreshCitationDate = false } = {},
+  ): Promise<UpdateOutcome> {
     if (!item || !item.isRegularItem()) {
       return { status: "skipped", message: "Item is not a regular Zotero item." };
     }
@@ -281,6 +304,7 @@ class OpenAlexWorkIDClass {
 
     const extra = (item.getField("extra") as string) || "";
     const current = parseOpenAlexMetadata(extra);
+    let itemChanged = false;
 
     let apiWork: OpenAlexWork | null = null;
     if (current.workID) {
@@ -288,15 +312,35 @@ class OpenAlexWorkIDClass {
     }
 
     if (!apiWork) {
-      const doi = extractDOIForLookup(item, extra);
+      const doiResolution = resolveDOIForLookup(item, extra);
+      if (doiResolution.fromArxivURL) {
+        itemChanged = applyArXivCorrections(item, doiResolution.arxivDOI) || itemChanged;
+      }
+
+      const doi = doiResolution.doi;
       if (!doi) {
-        return { status: "skipped", message: "No DOI or OpenAlex-WorkID found for this item." };
+        if (itemChanged) {
+          await item.saveTx();
+          return { status: "updated", message: "arXiv metadata corrected." };
+        }
+        return {
+          status: "skipped",
+          message: "No DOI, arXiv URL, or OpenAlex-WorkID found for this item.",
+        };
       }
 
       apiWork = await fetchOpenAlexWorkByDOI(doi);
     }
 
     if (!apiWork) {
+      if (itemChanged) {
+        await item.saveTx();
+        return {
+          status: "updated",
+          message: "arXiv metadata corrected. No matching OpenAlex Work found.",
+        };
+      }
+
       const apiError = getOpenAlexLastError();
       if (apiError) {
         return { status: "skipped", message: `OpenAlex lookup failed: ${apiError}` };
@@ -315,12 +359,15 @@ class OpenAlexWorkIDClass {
       replaceCitation: shouldReplaceCitation,
       citationCount: fetchedCitationCount,
     });
+    const extraChanged = updatedExtra !== extra;
 
-    if (updatedExtra === extra) {
+    if (!extraChanged && !itemChanged) {
       return { status: "unchanged" };
     }
 
-    item.setField("extra", updatedExtra);
+    if (extraChanged) {
+      item.setField("extra", updatedExtra);
+    }
     await item.saveTx();
     return { status: "updated" };
   }
@@ -493,20 +540,27 @@ function upsertOpenAlexMetadata(
   let updatedLines = lines;
 
   if (workID) {
-    updatedLines = updatedLines.filter(
-      (line) => !WORK_ID_LINE_PATTERN.test(line.trim()),
-    );
+    updatedLines = updatedLines.filter((line) => !WORK_ID_LINE_PATTERN.test(line.trim()));
     insertBeforeMatch(updatedLines, CITATION_KEY_LINE_PATTERN, `${WORK_ID_PREFIX} ${workID}`);
   }
 
   if (replaceCitation) {
     updatedLines = updatedLines.filter(
-      (line) => !CIT_COUNT_LINE_PATTERN.test(line.trim()) && !CIT_DATE_LINE_PATTERN.test(line.trim()),
+      (line) =>
+        !CIT_COUNT_LINE_PATTERN.test(line.trim()) && !CIT_DATE_LINE_PATTERN.test(line.trim()),
     );
     if (typeof citationCount === "number" && citationCount >= 0) {
       const citationDate = formatDate(new Date());
-      insertBeforeMatch(updatedLines, CITATION_KEY_LINE_PATTERN, `${CIT_DATE_PREFIX} ${citationDate}`);
-      insertBeforeMatch(updatedLines, CITATION_KEY_LINE_PATTERN, `${CIT_COUNT_PREFIX} ${citationCount}`);
+      insertBeforeMatch(
+        updatedLines,
+        CITATION_KEY_LINE_PATTERN,
+        `${CIT_DATE_PREFIX} ${citationDate}`,
+      );
+      insertBeforeMatch(
+        updatedLines,
+        CITATION_KEY_LINE_PATTERN,
+        `${CIT_COUNT_PREFIX} ${citationCount}`,
+      );
     }
   }
 
@@ -523,13 +577,47 @@ function insertBeforeMatch(lines: string[], pattern: RegExp, lineToInsert: strin
 }
 
 function normalizeExtraString(value: string) {
-  return value.replace(/\r/g, "").replace(/\n{3,}/g, "\n\n").trim();
+  return value
+    .replace(/\r/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function extractDOIForLookup(item: Zotero.Item, extra: string) {
+  return resolveDOIForLookup(item, extra).doi;
+}
+
+function resolveDOIForLookup(item: Zotero.Item, extra: string): DOIResolution {
   const fromField = normalizeDOI(item.getField("DOI") as string);
-  if (fromField) return fromField;
-  return extractDOIFromExtra(extra);
+  if (fromField) {
+    return { doi: fromField, arxivDOI: null, fromArxivURL: false };
+  }
+
+  const fromExtra = extractDOIFromExtra(extra);
+  if (fromExtra) {
+    return { doi: fromExtra, arxivDOI: null, fromArxivURL: false };
+  }
+
+  if (!getBooleanPref(OPENALEX_CORRECT_ARXIV_PREF, true)) {
+    return { doi: null, arxivDOI: null, fromArxivURL: false };
+  }
+
+  const arxivID = extractArXivIDFromURL(item.getField("url") as string);
+  if (!arxivID) {
+    return { doi: null, arxivDOI: null, fromArxivURL: false };
+  }
+
+  const arxivDOI = buildArXivDOI(arxivID);
+  const normalizedArxivDOI = normalizeDOI(arxivDOI);
+  if (!normalizedArxivDOI) {
+    return { doi: null, arxivDOI: null, fromArxivURL: false };
+  }
+
+  return {
+    doi: normalizedArxivDOI,
+    arxivDOI,
+    fromArxivURL: true,
+  };
 }
 
 function extractDOIFromExtra(extra: string) {
@@ -558,6 +646,71 @@ function normalizeDOI(value: string | undefined) {
 
   const match = doi.match(DOI_PATTERN);
   return match ? match[0].toLowerCase() : null;
+}
+
+function extractArXivIDFromURL(urlValue: string | undefined) {
+  if (!urlValue) return null;
+
+  const trimmed = String(urlValue).trim();
+  if (!trimmed || !/arxiv/i.test(trimmed)) {
+    return null;
+  }
+
+  const match = trimmed.match(ARXIV_URL_PATTERN);
+  if (!match || !match[1]) {
+    return null;
+  }
+
+  return normalizeArXivID(match[1]);
+}
+
+function normalizeArXivID(value: string | undefined) {
+  if (!value) return null;
+
+  let arxivID = String(value).trim();
+  arxivID = arxivID.replace(/^\/+/, "").replace(/\/+$/, "");
+  arxivID = arxivID.replace(/\.pdf$/i, "");
+  arxivID = arxivID.replace(/v\d+$/i, "");
+
+  if (ARXIV_ID_MODERN_PATTERN.test(arxivID)) {
+    return arxivID;
+  }
+
+  if (ARXIV_ID_LEGACY_PATTERN.test(arxivID)) {
+    return arxivID;
+  }
+
+  return null;
+}
+
+function buildArXivDOI(arxivID: string) {
+  return `${ARXIV_DOI_PREFIX}${arxivID}`;
+}
+
+function applyArXivCorrections(item: Zotero.Item, arxivDOI: string | null) {
+  if (!arxivDOI) return false;
+
+  let changed = false;
+
+  const currentDOI = normalizeDOI(item.getField("DOI") as string);
+  if (!currentDOI) {
+    item.setField("DOI", arxivDOI);
+    changed = true;
+  }
+
+  const preprintTypeID = getPreprintItemTypeID();
+  if (preprintTypeID && item.itemType !== "preprint") {
+    if (item.setType(preprintTypeID)) {
+      changed = true;
+    }
+  }
+
+  return changed;
+}
+
+function getPreprintItemTypeID() {
+  const typeID = Zotero.ItemTypes?.getID?.("preprint");
+  return typeof typeID === "number" && typeID > 0 ? typeID : null;
 }
 
 function normalizeOpenAlexID(value: string | undefined) {
@@ -624,7 +777,9 @@ function shouldUpdateOnStartup(item: Zotero.Item, staleMonths: number) {
 async function getAllRegularItems() {
   const allLibraries = Zotero.Libraries.getAll().filter(
     (library: any) =>
-      library && !library.deleted && (library.libraryType === "user" || library.libraryType === "group"),
+      library &&
+      !library.deleted &&
+      (library.libraryType === "user" || library.libraryType === "group"),
   );
 
   const itemIDs = new Set<number>();
@@ -701,7 +856,9 @@ async function fetchOpenAlexWorkByDOI(doi: string) {
     filter: `doi:${normalizedDOI}`,
     "per-page": "1",
   });
-  const byFilter = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/works?${fallbackParams.toString()}`);
+  const byFilter = await requestOpenAlexJSON(
+    `${OPENALEX_BASE_URL}/works?${fallbackParams.toString()}`,
+  );
   if (byFilter?.results && Array.isArray(byFilter.results) && byFilter.results.length > 0) {
     return byFilter.results[0] as OpenAlexWork;
   }
@@ -739,7 +896,9 @@ async function requestOpenAlexJSON(url: string): Promise<any> {
 
       const status = response?.status || 0;
       if (status === 401 || status === 403) {
-        setOpenAlexLastError("OpenAlex rejected the request (401/403). Your API key may be invalid.");
+        setOpenAlexLastError(
+          "OpenAlex rejected the request (401/403). Your API key may be invalid.",
+        );
       } else {
         const nonOkMessage = bodyMessage || `HTTP ${status || "unknown"}`;
         setOpenAlexLastError(nonOkMessage);
@@ -889,7 +1048,11 @@ function createProgressWindow() {
 }
 
 async function waitForZoteroReady() {
-  const readiness = [Zotero.initializationPromise, Zotero.unlockPromise, Zotero.uiReadyPromise].filter(Boolean);
+  const readiness = [
+    Zotero.initializationPromise,
+    Zotero.unlockPromise,
+    Zotero.uiReadyPromise,
+  ].filter(Boolean);
   if (readiness.length) {
     await Promise.all(readiness);
   }
@@ -899,4 +1062,8 @@ export const __test__ = {
   parseOpenAlexMetadata,
   upsertOpenAlexMetadata,
   normalizeDOI,
+  extractArXivIDFromURL,
+  normalizeArXivID,
+  buildArXivDOI,
+  resolveDOIForLookup,
 };

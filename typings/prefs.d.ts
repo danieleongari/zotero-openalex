@@ -9,6 +9,7 @@ declare namespace _ZoteroTypes {
     PluginPrefsMap: {
       "intensity": number;
       "autoUpdateOnStartup": boolean;
+      "correctArxivArticles": boolean;
       "staleMonths": number;
       "requestDelayMs": number;
       "startupDelayMs": number;

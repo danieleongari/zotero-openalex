@@ -24,16 +24,16 @@ Only `openalex.*` lines are parsed and managed by the plugin.
 
 If an item has no DOI in the DOI field, the plugin also tries DOI text found in `Extra`.
 
-## Installation (User)
+## Installation
 
 1. Download the latest `.xpi` from this repository's releases.
 2. Open Zotero.
 3. Install the `.xpi` as a plugin.
 4. Restart Zotero if requested.
 
-## Usage (User)
+## Usage
 
-### Manual update
+### Usage: Manual update
 
 1. Select one or more regular items in Zotero.
 2. Open the item context menu.
@@ -41,13 +41,15 @@ If an item has no DOI in the DOI field, the plugin also tries DOI text found in 
 
 For a single item, Zotero shows a direct result message. For multiple items, Zotero shows an aggregate summary.
 
-### Startup sync
+### Usage: Startup sync
 
 When enabled, startup sync scans regular items and updates those that are missing metadata or have stale citation dates.
 
-## Preferences (User)
+### Usage: Preferences (User)
 
 Preferences are stored under `extensions.zotero-openalex.*`.
+
+Most of these could be customized in the Settings panel of Zotero dedicated to the plugin (in Windows: Edit > Settings).
 
 - `autoUpdateOnStartup` (default `true`): enable startup sync.
 - `staleMonths` (default `3`): citation data older than this is considered stale.
@@ -55,13 +57,11 @@ Preferences are stored under `extensions.zotero-openalex.*`.
 - `startupDelayMs` (default `3000`): delay before startup sync begins after Zotero startup.
 - `showStartupSummary` (default `true`): show startup status/summary window.
 - `apiKey` (default empty): optional OpenAlex API key.
+- `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
 
-## Optional API key (User)
+### Usage: Optional API key (User)
 
 The plugin works without an API key. You can optionally set one in Zotero settings to improve request allowance.
-
-- Open Zotero settings and go to the OpenAlex pane.
-- Enter key, clear key, or test connectivity from the pane.
 
 Get an OpenAlex API key at:
 
@@ -138,10 +138,6 @@ npm run release
 - `src/modules/openalex.ts`: OpenAlex logic, metadata parsing/upsert, menu wiring, startup sync, citations column.
 - `addon/`: runtime assets (`manifest.json`, `bootstrap.js`, prefs/panes assets).
 - `zotero-plugin.config.ts`: scaffold build and release configuration.
-
-## Packaging note
-
-Legacy `make-zips*` scripts were removed. Packaging and release should now go through scaffold commands (`npm run build` and `npm run release`).
 
 ## Troubleshooting
 
