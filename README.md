@@ -149,3 +149,5 @@ npm run release
 Thread opened on Zotero's forum at
 [https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection](https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection),
 to gather feedback and enthusiasts interested to collaborate.
+
+Disclaimer: This is an unofficial plugin. The author is not affiliated with, endorsed by, or associated with Zotero or OpenAlex.
