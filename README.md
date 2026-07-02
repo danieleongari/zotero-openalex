@@ -142,6 +142,10 @@ npm run release
 
 ## Acknowledgements
 
-- OpenAlex Work-ID retrieval inspired from [mtillman14/open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
-- Citation Graph inspired from [Exyeus/zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
-- Citation column inspired from [daeh/zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+- OpenAlex Work-ID retrieval inspired by [mtillman14/open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
+- Citation Graph inspired by [Exyeus/zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
+- Citation column inspired by [daeh/zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+
+Thread opened on Zotero's forum at
+[https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection](https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection),
+to gather feedback and enthusiasts interested to collaborate.
