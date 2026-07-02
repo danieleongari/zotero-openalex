@@ -10,19 +10,13 @@ It stores machine-readable fields in each item's `Extra` field:
 
 Only `openalex.*` lines are parsed and managed by the plugin.
 
-## Compatibility
-
-- Zotero strict minimum version: `6.999`
-- Zotero strict maximum version: `9.*`
-
 ## What the plugin does
 
-- Adds a context-menu action (`Get OpenAlex-WorkID`) to update selected regular items.
-- Runs optional startup synchronization to refresh missing/stale OpenAlex metadata.
-- Adds a `Citations` column in the Zotero items table.
-- Uses DOI-based lookup against the OpenAlex API.
-
-If an item has no DOI in the DOI field, the plugin also tries DOI text found in `Extra`.
+- Uses DOI-based lookup against the OpenAlex API to retrieve WorkID (OpenAlex indexing for articles) and number of citations.
+- Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
+- Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
+- Show the number of citations as the column "Citations"
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Citation Graph..." showing which article is citing what, among the items in the Collection or its SubCollections
 
 ## Installation
 
@@ -145,3 +139,9 @@ npm run release
 - If API calls fail with `401/403`, verify the API key.
 - If updates are skipped, verify the item has a DOI (field or `Extra`).
 - If startup sync feels slow, increase `requestDelayMs` cautiously and adjust `staleMonths`.
+
+## Acknowledgements
+
+- OpenAlex Work-ID retrieval inspired from [mtillman14/open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
+- Citation Graph inspired from [Exyeus/zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
+- Citation column inspired from [daeh/zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)

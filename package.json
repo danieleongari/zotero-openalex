@@ -1,7 +1,7 @@
 {
   "name": "zotero-openalex",
   "type": "module",
-  "version": "3.5.0",
+  "version": "9.0.0",
   "description": "Set the OpenAlex WorkID",
   "config": {
     "addonName": "Zotero OpenAlex",

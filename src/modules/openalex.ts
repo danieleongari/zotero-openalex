@@ -1,3 +1,5 @@
+import { renderCollectionCitationGraphWindow } from "./citationGraphWindow";
+
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 const WORK_ID_PREFIX = "openalex.work_id:";
 const CIT_COUNT_PREFIX = "openalex.cit_count:";
@@ -5,6 +7,7 @@ const CIT_DATE_PREFIX = "openalex.cit_date:";
 const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
+const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
 
@@ -34,6 +37,45 @@ interface OpenAlexWork {
   cited_by_count?: number | string;
 }
 
+interface OpenAlexGraphWork extends OpenAlexWork {
+  display_name?: string;
+  publication_year?: number | string;
+  referenced_works?: string[];
+}
+
+interface CollectionGraphNode {
+  id: string;
+  itemID: number;
+  workID: string;
+  label: string;
+  citationCount: number | null;
+  referencesCount: number | null;
+  year: number | null;
+  publisher: string | null;
+  firstAuthor: string | null;
+  lastAuthor: string | null;
+  publicationDate: string | null;
+  collectionPaths: string[];
+}
+
+interface CollectionGraphEdge {
+  source: string;
+  target: string;
+}
+
+interface CollectionGraphData {
+  collectionName: string;
+  nodes: CollectionGraphNode[];
+  edges: CollectionGraphEdge[];
+  skippedMissingWorkID: number;
+  fetchFailures: number;
+}
+
+interface GraphScopeData {
+  items: Zotero.Item[];
+  collectionPathsByItemID: Map<number, string[]>;
+}
+
 interface DOIResolution {
   doi: string | null;
   arxivDOI: string | null;
@@ -54,8 +96,10 @@ class OpenAlexWorkIDClass {
   private windowCleanup = new WeakMap<
     Window,
     {
-      onPopupShowing?: () => void;
-      onCommand?: () => void;
+      onItemPopupShowing?: () => void;
+      onItemCommand?: () => void;
+      onCollectionPopupShowing?: () => void;
+      onCollectionCommand?: () => void;
       onSyncCommand?: () => void;
     }
   >();
@@ -69,16 +113,15 @@ class OpenAlexWorkIDClass {
   addToWindow(window: Window) {
     const doc = window.document;
     const itemMenuPopup = doc.querySelector("#zotero-itemmenu");
+    const collectionMenuPopup = getCollectionMenuPopup(doc);
     if (!itemMenuPopup) return;
 
     this.removeFromWindow(window);
 
-    let menuItem = doc.getElementById("workid-menuitem");
-
-    menuItem = doc.createXULElement("menuitem");
+    const menuItem = doc.createXULElement("menuitem");
     menuItem.setAttribute("label", "Get OpenAlex-WorkID");
     menuItem.setAttribute("id", "workid-menuitem");
-    const onCommand = async () => {
+    const onItemCommand = async () => {
       try {
         await this.updateSelectedItems(window);
       } catch (error) {
@@ -87,23 +130,54 @@ class OpenAlexWorkIDClass {
         window.alert("An error occurred while processing OpenAlex metadata.");
       }
     };
-    menuItem.addEventListener("command", onCommand);
+    menuItem.addEventListener("command", onItemCommand);
 
     itemMenuPopup.appendChild(menuItem);
 
-    const onPopupShowing = () => {
+    const onItemPopupShowing = () => {
       const pane = Zotero.getActiveZoteroPane();
       const selectedItems = pane ? pane.getSelectedItems() : [];
       (menuItem as any).hidden = selectedItems.length === 0;
     };
-    itemMenuPopup.addEventListener("popupshowing", onPopupShowing);
+    itemMenuPopup.addEventListener("popupshowing", onItemPopupShowing);
 
-    const onSyncCommand = this.addToolsSyncMenu(window);
+    const collectionGraphMenuItem = doc.createXULElement("menuitem");
+    collectionGraphMenuItem.setAttribute("label", "Generate OpenAlex Citation Graph...");
+    collectionGraphMenuItem.setAttribute("id", COLLECTION_GRAPH_MENU_ID);
+
+    const onCollectionCommand = async () => {
+      try {
+        await this.openCollectionCitationGraph(window);
+      } catch (error) {
+        Zotero.debug("Error opening OpenAlex citation graph");
+        Zotero.debug(error);
+        window.alert(`An error occurred while building the citation graph: ${String(error)}`);
+      }
+    };
+    if (collectionMenuPopup) {
+      collectionGraphMenuItem.addEventListener("command", onCollectionCommand);
+      collectionMenuPopup.appendChild(collectionGraphMenuItem);
+
+      const onCollectionPopupShowing = () => {
+        const hasSelection = hasGraphScopeSelection();
+        (collectionGraphMenuItem as any).hidden = !hasSelection;
+      };
+      collectionMenuPopup.addEventListener("popupshowing", onCollectionPopupShowing);
+
+      this.windowCleanup.set(window, {
+        onItemPopupShowing,
+        onItemCommand,
+        onCollectionPopupShowing,
+        onCollectionCommand,
+        onSyncCommand: this.addToolsSyncMenu(window),
+      });
+      return;
+    }
 
     this.windowCleanup.set(window, {
-      onPopupShowing,
-      onCommand,
-      onSyncCommand,
+      onItemPopupShowing,
+      onItemCommand,
+      onSyncCommand: this.addToolsSyncMenu(window),
     });
   }
 
@@ -112,9 +186,7 @@ class OpenAlexWorkIDClass {
     const toolsPopup = doc.getElementById("menu_ToolsPopup");
     if (!toolsPopup) return undefined;
 
-    let syncMenuItem = doc.getElementById(TOOLS_SYNC_MENU_ID);
-
-    syncMenuItem = doc.createXULElement("menuitem");
+    const syncMenuItem = doc.createXULElement("menuitem");
     syncMenuItem.setAttribute("id", TOOLS_SYNC_MENU_ID);
     syncMenuItem.setAttribute("label", "Run OpenAlex Startup Sync");
     const onSyncCommand = () => {
@@ -131,17 +203,29 @@ class OpenAlexWorkIDClass {
     const cleanup = this.windowCleanup.get(window);
 
     const menuItem = doc.getElementById("workid-menuitem");
-    if (menuItem && cleanup?.onCommand) {
-      menuItem.removeEventListener("command", cleanup.onCommand);
+    if (menuItem && cleanup?.onItemCommand) {
+      menuItem.removeEventListener("command", cleanup.onItemCommand);
     }
 
     const itemMenuPopup = doc.querySelector("#zotero-itemmenu");
-    if (itemMenuPopup && cleanup?.onPopupShowing) {
-      itemMenuPopup.removeEventListener("popupshowing", cleanup.onPopupShowing);
+    if (itemMenuPopup && cleanup?.onItemPopupShowing) {
+      itemMenuPopup.removeEventListener("popupshowing", cleanup.onItemPopupShowing);
     }
 
     if (menuItem) {
       menuItem.remove();
+    }
+
+    const collectionMenuPopup = getCollectionMenuPopup(doc);
+    const collectionMenuItem = doc.getElementById(COLLECTION_GRAPH_MENU_ID);
+    if (collectionMenuItem && cleanup?.onCollectionCommand) {
+      collectionMenuItem.removeEventListener("command", cleanup.onCollectionCommand);
+    }
+    if (collectionMenuPopup && cleanup?.onCollectionPopupShowing) {
+      collectionMenuPopup.removeEventListener("popupshowing", cleanup.onCollectionPopupShowing);
+    }
+    if (collectionMenuItem) {
+      collectionMenuItem.remove();
     }
 
     const toolsMenuItem = doc.getElementById(TOOLS_SYNC_MENU_ID);
@@ -372,6 +456,62 @@ class OpenAlexWorkIDClass {
     return { status: "updated" };
   }
 
+  async openCollectionCitationGraph(window: Window) {
+    const collection = getSelectedCollection();
+    const libraryID = isLibrarySelectionActive() ? getSelectedLibraryID() : undefined;
+    if (!collection && !libraryID) {
+      window.alert("No collection or library selected.");
+      return;
+    }
+
+    const graphWindow = openCollectionCitationGraphShellWindow();
+
+    const updateProgress = (message: string, progress: number) => {
+      Zotero.debug(`OpenAlex graph: ${message}`);
+      updateCollectionCitationGraphShellStatus(graphWindow, message, progress);
+    };
+
+    try {
+      const graphData = collection
+        ? await buildCollectionCitationGraphData(collection, updateProgress)
+        : await buildLibraryCitationGraphData(libraryID as number, updateProgress);
+      if (!graphData.nodes.length) {
+        const scopeLabel = collection ? "selected collection tree" : "selected library collections";
+        updateProgress(`No eligible items found in the ${scopeLabel}.`, 100);
+        window.alert(
+          "No graph could be generated. Ensure some items have openalex.work_id in Extra.",
+        );
+        try {
+          graphWindow?.close();
+        } catch {
+          // Ignore close errors.
+        }
+        return;
+      }
+
+      updateProgress(
+        `Done: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`,
+        100,
+      );
+
+      if (graphWindow && !graphWindow.closed) {
+        renderCollectionCitationGraphWindow(graphWindow, graphData);
+      } else {
+        openCollectionCitationGraphWindow(graphData);
+      }
+    } catch (error) {
+      Zotero.debug("OpenAlex collection citation graph failed");
+      Zotero.debug(error);
+      updateProgress(`Failed: ${String(error)}`, 100);
+      try {
+        graphWindow?.close();
+      } catch {
+        // Ignore close errors.
+      }
+      window.alert(`Failed to build citation graph: ${String(error)}`);
+    }
+  }
+
   async main() {
     await waitForZoteroReady();
 
@@ -425,8 +565,26 @@ class OpenAlexWorkIDClass {
       const staleMonths = getNumberPref("staleMonths", 3);
       const requestDelayMs = getNumberPref("requestDelayMs", 1000);
 
-      const allRegularItems = await getAllRegularItems();
-      const candidates = allRegularItems.filter((item) => shouldUpdateOnStartup(item, staleMonths));
+      let allRegularItems: Zotero.Item[] = [];
+      try {
+        allRegularItems = await getAllRegularItems();
+      } catch (error) {
+        Zotero.debug("OpenAlex startup sync: failed loading regular items");
+        Zotero.debug(error);
+        allRegularItems = [];
+      }
+
+      const candidates: Zotero.Item[] = [];
+      for (const item of allRegularItems) {
+        try {
+          if (shouldUpdateOnStartup(item, staleMonths)) {
+            candidates.push(item);
+          }
+        } catch (error) {
+          Zotero.debug(`OpenAlex startup sync: failed eligibility check for item ${item?.id}`);
+          Zotero.debug(error);
+        }
+      }
 
       Zotero.debug(
         `OpenAlex startup sync: ${candidates.length} candidate items out of ${allRegularItems.length}.`,
@@ -446,7 +604,18 @@ class OpenAlexWorkIDClass {
 
       for (let i = 0; i < candidates.length; i++) {
         const item = candidates[i];
-        const outcome = await this.updateSingleItem(item, { refreshCitationDate: true });
+        let outcome: UpdateOutcome;
+        try {
+          outcome = await this.updateSingleItem(item, { refreshCitationDate: true });
+        } catch (error) {
+          Zotero.debug(`OpenAlex startup sync: item ${item.id} failed`);
+          Zotero.debug(error);
+          skippedCount++;
+          if (requestDelayMs > 0 && i < candidates.length - 1) {
+            await delay(requestDelayMs);
+          }
+          continue;
+        }
 
         if (outcome.status === "updated") {
           updatedCount++;
@@ -481,7 +650,10 @@ class OpenAlexWorkIDClass {
       Zotero.debug("OpenAlex startup sync failed");
       Zotero.debug(error);
       if (shouldShowSummary) {
-        showStatusMessage("OpenAlex", "Startup sync failed. Check Zotero debug output.");
+        showStatusMessage(
+          "OpenAlex",
+          `Startup sync failed: ${String(error)}. Check Zotero debug output.`,
+        );
         closeStatusWindow(3000);
       }
     } finally {
@@ -491,6 +663,519 @@ class OpenAlexWorkIDClass {
 }
 
 export const openAlexWorkID = new OpenAlexWorkIDClass();
+
+function getCollectionMenuPopup(doc: Document) {
+  return doc.querySelector("#zotero-collectionmenu");
+}
+
+function getSelectedCollectionID() {
+  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedCollection(true);
+}
+
+function getSelectedCollection() {
+  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedCollection();
+}
+
+function getSelectedLibraryID() {
+  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedLibraryID?.();
+}
+
+function isLibrarySelectionActive() {
+  const pane = Zotero.getMainWindow()?.ZoteroPane;
+  if (!pane) return false;
+
+  if (pane.getSelectedCollection?.(true)) {
+    return false;
+  }
+
+  if (pane.getSelectedSavedSearch?.(true)) {
+    return false;
+  }
+
+  const libraryID = pane.getSelectedLibraryID?.();
+  return typeof libraryID === "number" && libraryID > 0;
+}
+
+function hasGraphScopeSelection() {
+  if (getSelectedCollectionID()) {
+    return true;
+  }
+  return isLibrarySelectionActive();
+}
+
+async function buildCollectionCitationGraphData(
+  rootCollection: Zotero.Collection,
+  updateProgress: (message: string, progress: number) => void,
+): Promise<CollectionGraphData> {
+  const scopedData = collectCollectionItemsRecursively(rootCollection);
+  return buildCitationGraphDataFromScope(
+    rootCollection.name,
+    scopedData,
+    updateProgress,
+    "Reading collection and subcollections...",
+  );
+}
+
+async function buildLibraryCitationGraphData(
+  libraryID: number,
+  updateProgress: (message: string, progress: number) => void,
+): Promise<CollectionGraphData> {
+  const libraryName = String(Zotero.Libraries.getName(libraryID) || `Library ${libraryID}`).trim();
+  const scopedData = collectLibraryItemsRecursively(libraryID, libraryName);
+  return buildCitationGraphDataFromScope(
+    libraryName,
+    scopedData,
+    updateProgress,
+    "Reading library collections...",
+  );
+}
+
+async function buildCitationGraphDataFromScope(
+  scopeName: string,
+  scopedData: GraphScopeData,
+  updateProgress: (message: string, progress: number) => void,
+  initialProgressMessage: string,
+): Promise<CollectionGraphData> {
+  updateProgress(initialProgressMessage, 8);
+  const scopedItems = scopedData.items;
+
+  const eligibleNodes: CollectionGraphNode[] = [];
+  let skippedMissingWorkID = 0;
+
+  for (const item of scopedItems) {
+    const extra = (item.getField("extra") as string) || "";
+    const metadata = parseOpenAlexMetadata(extra);
+    if (!metadata.workID) {
+      skippedMissingWorkID++;
+      continue;
+    }
+
+    const title = getItemTitleSafe(item);
+    const authorDateInfo = extractLocalNodeAuthorAndDate(item);
+    const collectionPaths = scopedData.collectionPathsByItemID.get(item.id) || [];
+    eligibleNodes.push({
+      id: `n${item.id}`,
+      itemID: item.id,
+      workID: metadata.workID,
+      label: truncateLabel(title || "Untitled", 84),
+      citationCount: metadata.citationCount,
+      referencesCount: null,
+      year: normalizeYear(item.getField("date") as string),
+      publisher: extractPublisherForHover(item),
+      firstAuthor: authorDateInfo.firstAuthor,
+      lastAuthor: authorDateInfo.lastAuthor,
+      publicationDate: authorDateInfo.itemDate,
+      collectionPaths,
+    });
+  }
+
+  if (!eligibleNodes.length) {
+    return {
+      collectionName: scopeName,
+      nodes: [],
+      edges: [],
+      skippedMissingWorkID,
+      fetchFailures: 0,
+    };
+  }
+
+  updateProgress("Fetching OpenAlex references...", 18);
+
+  const nodeIDsByWorkID = new Map<string, string[]>();
+  for (const node of eligibleNodes) {
+    const current = nodeIDsByWorkID.get(node.workID) || [];
+    current.push(node.id);
+    nodeIDsByWorkID.set(node.workID, current);
+  }
+
+  const requestDelayMs = Math.max(0, getNumberPref("requestDelayMs", 1000));
+  const workCache = new Map<string, OpenAlexGraphWork | null>();
+  const edgeKeySet = new Set<string>();
+  let fetchFailures = 0;
+
+  for (let index = 0; index < eligibleNodes.length; index++) {
+    const source = eligibleNodes[index];
+    const progress = 18 + Math.floor((index / eligibleNodes.length) * 76);
+    updateProgress(`Reading references for ${index + 1}/${eligibleNodes.length}...`, progress);
+
+    const work = await fetchOpenAlexGraphWorkByID(source.workID, workCache);
+    if (!work) {
+      fetchFailures++;
+      continue;
+    }
+
+    const openAlexCitationCount = normalizeCitationCount(work.cited_by_count);
+    if (openAlexCitationCount !== null) {
+      source.citationCount = openAlexCitationCount;
+    }
+
+    const references = Array.isArray(work.referenced_works) ? work.referenced_works : [];
+    source.referencesCount = references.length;
+    for (const rawRef of references) {
+      const referencedWorkID = normalizeOpenAlexID(rawRef);
+      if (!referencedWorkID) continue;
+
+      const targetNodeIDs = nodeIDsByWorkID.get(referencedWorkID) || [];
+      for (const targetNodeID of targetNodeIDs) {
+        if (targetNodeID === source.id) continue;
+        edgeKeySet.add(`${source.id}|${targetNodeID}`);
+      }
+    }
+
+    if (requestDelayMs > 0 && index < eligibleNodes.length - 1) {
+      await delay(requestDelayMs);
+    }
+  }
+
+  const edges: CollectionGraphEdge[] = [...edgeKeySet]
+    .sort((left, right) => left.localeCompare(right))
+    .map((key) => {
+      const [source, target] = key.split("|");
+      return { source, target };
+    });
+
+  updateProgress("Finalizing graph...", 96);
+
+  return {
+    collectionName: scopeName,
+    nodes: eligibleNodes,
+    edges,
+    skippedMissingWorkID,
+    fetchFailures,
+  };
+}
+
+function collectCollectionItemsRecursively(rootCollection: Zotero.Collection): GraphScopeData {
+  return collectItemsFromCollectionRoots([
+    { collection: rootCollection, path: rootCollection.name },
+  ]);
+}
+
+function collectLibraryItemsRecursively(libraryID: number, libraryName: string): GraphScopeData {
+  const libraryCollections = Zotero.Collections.getByLibrary(libraryID, false) || [];
+  const topLevelCollections = libraryCollections.filter(
+    (collection) => !collection.parentID,
+  );
+
+  return collectItemsFromCollectionRoots(
+    topLevelCollections.map((collection) => ({
+      collection,
+      path: `${libraryName} / ${collection.name}`,
+    })),
+  );
+}
+
+function collectItemsFromCollectionRoots(
+  roots: Array<{ collection: Zotero.Collection; path: string }>,
+): GraphScopeData {
+  const itemByID = new Map<number, Zotero.Item>();
+  const collectionPathsByItemID = new Map<number, Set<string>>();
+  const queue = [...roots];
+  const seenCollectionIDs = new Set<number>();
+
+  while (queue.length) {
+    const current = queue.shift();
+    if (!current) continue;
+    const currentCollection = current.collection;
+    if (seenCollectionIDs.has(currentCollection.id)) continue;
+    seenCollectionIDs.add(currentCollection.id);
+
+    const rawItems = currentCollection.getChildItems(false, false) || [];
+    const scopedItems = rawItems.filter((item) => {
+      try {
+        return item.isRegularItem() && item.isTopLevelItem();
+      } catch (_error) {
+        return false;
+      }
+    });
+
+    for (const item of scopedItems) {
+      itemByID.set(item.id, item);
+      if (!collectionPathsByItemID.has(item.id)) {
+        collectionPathsByItemID.set(item.id, new Set<string>());
+      }
+      collectionPathsByItemID.get(item.id)?.add(current.path);
+    }
+
+    const childCollections = ((currentCollection as any).getChildCollections?.(
+      false,
+      false,
+    ) || []) as Zotero.Collection[];
+
+    for (const child of childCollections) {
+      if (!seenCollectionIDs.has(child.id)) {
+        queue.push({
+          collection: child,
+          path: `${current.path} / ${child.name}`,
+        });
+      }
+    }
+  }
+
+  return {
+    items: [...itemByID.values()],
+    collectionPathsByItemID: new Map<number, string[]>(
+      [...collectionPathsByItemID.entries()].map(([itemID, paths]) => [
+        itemID,
+        [...paths].sort((left, right) => left.localeCompare(right)),
+      ]),
+    ),
+  };
+}
+
+function truncateLabel(value: string, maxLength: number) {
+  const trimmed = String(value || "").trim();
+  if (trimmed.length <= maxLength) return trimmed;
+  return `${trimmed.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
+function getItemTitleSafe(item: Zotero.Item) {
+  const rawTitle = String(item.getField("title") || "").trim();
+  if (rawTitle) return rawTitle;
+
+  const maybeDisplayTitle = (item as any).getDisplayTitle;
+  if (typeof maybeDisplayTitle === "function") {
+    try {
+      const fallback = String(maybeDisplayTitle.call(item) || "").trim();
+      if (fallback) return fallback;
+    } catch (_error) {
+      // Ignore and keep fallback below.
+    }
+  }
+
+  return "Untitled";
+}
+
+function extractPublisherForHover(item: Zotero.Item) {
+  const publisher = String(item.getField("publisher") || "").trim();
+  if (publisher) return publisher;
+
+  const publicationTitle = String(item.getField("publicationTitle") || "").trim();
+  if (publicationTitle) return publicationTitle;
+
+  return null;
+}
+
+function extractLocalNodeAuthorAndDate(item: Zotero.Item) {
+  const creators = (((item as any).getCreators?.() || []) as any[]).filter(
+    (creator) => creator,
+  );
+  const authorLikeCreators = creators.filter((creator) => {
+    const typeName = getCreatorTypeName(creator);
+    return typeName === "author" || typeName === "inventor";
+  });
+  const creatorsForHover = authorLikeCreators.length ? authorLikeCreators : creators;
+
+  let firstAuthor = creatorsForHover.length
+    ? formatCreatorName(creatorsForHover[0])
+    : undefined;
+  let lastAuthor = creatorsForHover.length
+    ? formatCreatorName(creatorsForHover[creatorsForHover.length - 1])
+    : undefined;
+
+  const firstCreatorField = String((item as any).firstCreator || "").trim();
+  if (!firstAuthor && firstCreatorField) {
+    firstAuthor = firstCreatorField;
+  }
+  if (!lastAuthor && firstCreatorField) {
+    lastAuthor = firstCreatorField;
+  }
+
+  const itemDate = String(item.getField("date") || "").trim() || undefined;
+  return {
+    firstAuthor: firstAuthor || null,
+    lastAuthor: lastAuthor || null,
+    itemDate: itemDate || null,
+  };
+}
+
+function formatCreatorName(creator: any): string | undefined {
+  const singleFieldName = String(creator?.name || "").trim();
+  if (singleFieldName) {
+    return singleFieldName;
+  }
+
+  const lastName = String(creator?.lastName || "").trim();
+  const firstName = String(creator?.firstName || "").trim();
+
+  if (lastName && firstName) {
+    return `${lastName}, ${firstName}`;
+  }
+  if (lastName) {
+    return lastName;
+  }
+  if (firstName) {
+    return firstName;
+  }
+  return undefined;
+}
+
+function getCreatorTypeName(creator: any) {
+  const directType = String(
+    creator?.creatorType || creator?.creatorTypeName || "",
+  )
+    .trim()
+    .toLowerCase();
+  if (directType) {
+    return directType;
+  }
+
+  const creatorTypeID = Number.parseInt(String(creator?.creatorTypeID), 10);
+  if (
+    Number.isFinite(creatorTypeID) &&
+    (Zotero as any).CreatorTypes?.getName
+  ) {
+    try {
+      return String((Zotero as any).CreatorTypes.getName(creatorTypeID) || "")
+        .trim()
+        .toLowerCase();
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  return "";
+}
+
+function normalizeYear(value: string | undefined) {
+  if (!value) return null;
+  const match = String(value).match(/\b(18|19|20|21)\d{2}\b/);
+  return match ? Number.parseInt(match[0], 10) : null;
+}
+
+async function fetchOpenAlexGraphWorkByID(
+  workID: string,
+  cache: Map<string, OpenAlexGraphWork | null>,
+) {
+  const normalizedWorkID = normalizeOpenAlexID(workID);
+  if (!normalizedWorkID) return null;
+
+  if (cache.has(normalizedWorkID)) {
+    return cache.get(normalizedWorkID) || null;
+  }
+
+  const params = buildOpenAlexParams({
+    select: "id,display_name,publication_year,referenced_works,cited_by_count",
+  });
+  const url = `${OPENALEX_BASE_URL}/works/${normalizedWorkID}?${params.toString()}`;
+  const work = (await requestOpenAlexJSON(url)) as OpenAlexGraphWork | null;
+  cache.set(normalizedWorkID, work || null);
+  return work || null;
+}
+
+function openCollectionCitationGraphWindow(graphData: CollectionGraphData) {
+  const popup = openCollectionCitationGraphShellWindow();
+  if (!popup) {
+    throw new Error("Unable to open graph window.");
+  }
+  renderCollectionCitationGraphWindow(popup, graphData);
+}
+
+function openCollectionCitationGraphShellWindow() {
+  const mainWin = Zotero.getMainWindow() as Window | undefined;
+  if (!mainWin) {
+    return null;
+  }
+
+  const availableWidthRaw = Number(mainWin.screen?.availWidth || mainWin.innerWidth || 1280);
+  const availableHeightRaw = Number(mainWin.screen?.availHeight || mainWin.innerHeight || 900);
+
+  const availableWidth =
+    Number.isFinite(availableWidthRaw) && availableWidthRaw > 0 ? availableWidthRaw : 1280;
+  const availableHeight =
+    Number.isFinite(availableHeightRaw) && availableHeightRaw > 0 ? availableHeightRaw : 900;
+
+  const minWidth = 760;
+  const minHeight = 520;
+  const targetWidth = 1200;
+  const targetHeight = 820;
+
+  const width = Math.max(minWidth, Math.min(targetWidth, Math.floor(availableWidth - 36)));
+  const height = Math.max(minHeight, Math.min(targetHeight, Math.floor(availableHeight - 64)));
+
+  const left = Math.max(0, Math.floor((availableWidth - width) / 2));
+  const top = Math.max(0, Math.floor((availableHeight - height) / 2));
+
+  let popup: Window | null = null;
+  try {
+    if (typeof (mainWin as any).openDialog === "function") {
+      popup = (mainWin as any).openDialog(
+        "about:blank",
+        "_blank",
+        `chrome,dialog=no,resizable,centerscreen,width=${width},height=${height}`,
+      ) as Window;
+    }
+  } catch (error) {
+    Zotero.debug("OpenAlex graph: openDialog failed");
+    Zotero.debug(error);
+    popup = null;
+  }
+
+  if (!popup) {
+    try {
+      if (typeof mainWin.open === "function") {
+        popup = mainWin.open(
+          "about:blank",
+          "_blank",
+          `popup=yes,resizable=yes,width=${width},height=${height},left=${left},top=${top}`,
+        );
+      }
+    } catch (error) {
+      Zotero.debug("OpenAlex graph: window.open failed");
+      Zotero.debug(error);
+      popup = null;
+    }
+  }
+
+  if (!popup) {
+    return null;
+  }
+
+  const loadingHTML = `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>OpenAlex Citation Graph</title>
+  <style>
+    body { font-family: "Segoe UI", "Noto Sans", sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f4f8fc; color: #1f3347; }
+    .card { background: #fff; border: 1px solid #d5e2ef; border-radius: 10px; padding: 16px 20px; }
+  </style>
+</head>
+<body>
+  <div class="card" id="graph-loading-status">Building citation graph...</div>
+</body>
+</html>`;
+  popup.document.open();
+  popup.document.write(loadingHTML);
+  popup.document.close();
+  return popup;
+}
+
+function updateCollectionCitationGraphShellStatus(
+  popup: Window | null,
+  message: string,
+  progress?: number,
+) {
+  if (!popup || popup.closed) {
+    return;
+  }
+
+  try {
+    const doc = popup.document;
+    const statusNode = doc.getElementById("graph-loading-status");
+    if (!statusNode) {
+      return;
+    }
+
+    const progressText =
+      typeof progress === "number" && Number.isFinite(progress)
+        ? ` (${Math.max(0, Math.min(100, Math.round(progress)))}%)`
+        : "";
+    statusNode.textContent = `${message}${progressText}`;
+  } catch (_error) {
+    // Ignore status update errors in partially closed windows.
+  }
+}
 
 function parseOpenAlexMetadata(extra: string): OpenAlexMetadata {
   const metadata: OpenAlexMetadata = {
