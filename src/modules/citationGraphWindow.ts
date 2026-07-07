@@ -409,6 +409,24 @@ export function renderCollectionCitationGraphWindow(
       return lines;
     }
 
+    function formatNodeDisplayLabel(node) {
+      const rawLabel = String(node.label || "")
+        .replaceAll("-", " ")
+        .replaceAll("‐", " ")
+        .replaceAll("‑", " ")
+        .replaceAll("‒", " ")
+        .replaceAll("–", " ")
+        .replaceAll("—", " ")
+        .replaceAll("―", " ")
+        .replaceAll("−", " ")
+        .replace(/ +/g, " ")
+        .trim();
+      if (typeof node.year === "number") {
+        return "[" + node.year + "] " + rawLabel;
+      }
+      return rawLabel;
+    }
+
     function showHoverCard(node, event) {
       if (!hoverCard || !graphShell) {
         return;
@@ -471,7 +489,7 @@ export function renderCollectionCitationGraphWindow(
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
         .replace(/>/g, "&gt;")
-        .replace(/\"/g, "&quot;")
+        .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
     }
 
@@ -486,9 +504,10 @@ export function renderCollectionCitationGraphWindow(
       for (const node of nodePositions) {
         const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
         const circle = svgCircle(node.x, node.y, nodeRadius);
+        const displayLabel = formatNodeDisplayLabel(node);
 
         const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-        title.textContent = node.label + "\\n" + node.workID;
+        title.textContent = displayLabel + "\\n" + node.workID;
         circle.appendChild(title);
 
         g.addEventListener("mouseenter", (event) => showHoverCard(node, event));
@@ -496,7 +515,7 @@ export function renderCollectionCitationGraphWindow(
         g.addEventListener("mouseleave", hideHoverCard);
 
         g.appendChild(circle);
-        g.appendChild(svgText(node.x + 9, node.y - 9, node.label));
+        g.appendChild(svgText(node.x + 9, node.y - 9, displayLabel));
         nodesLayer.appendChild(g);
       }
     }
@@ -511,8 +530,21 @@ export function renderCollectionCitationGraphWindow(
 
     svg.addEventListener("wheel", (event) => {
       event.preventDefault();
+      const svgRect = svg.getBoundingClientRect();
+      const pointerX = event.clientX - svgRect.left;
+      const pointerY = event.clientY - svgRect.top;
+      const worldX = (pointerX - panX) / scale;
+      const worldY = (pointerY - panY) / scale;
+
       const step = event.deltaY < 0 ? 1.08 : 0.92;
-      scale = clamp(scale * step, 0.3, 3.2);
+      const newScale = clamp(scale * step, 0.3, 3.2);
+      if (newScale === scale) {
+        return;
+      }
+
+      scale = newScale;
+      panX = pointerX - worldX * scale;
+      panY = pointerY - worldY * scale;
       applyTransform();
     }, { passive: false });
 
