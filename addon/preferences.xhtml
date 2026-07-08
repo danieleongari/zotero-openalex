@@ -1,7 +1,5 @@
 <vbox onload="initOpenAlexPreferencesPane()" xmlns:html="http://www.w3.org/1999/xhtml">
   <groupbox>
-    
-
     <label value="OpenAlex API key" />
 
     <html:input
@@ -32,8 +30,15 @@
         style="width: 4em; max-width: 100%; margin-inline-start: 0.5em"
       />
     </hbox>
-    
-    <checkbox id="openalex-correct-arxiv" label="Correct arXiv articles: change 'Item Type' to 'preprint' and set DOI if missing" />
 
+    <checkbox
+      id="openalex-correct-arxiv"
+      label="Correct arXiv articles: change 'Item Type' to 'preprint' and set DOI if missing"
+    />
+
+    <checkbox
+      id="openalex-show-graph-tuning-controls"
+      label="Show graph tuning controls in the Citation Graph window"
+    />
   </groupbox>
 </vbox>

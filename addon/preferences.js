@@ -2,6 +2,8 @@ const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "extensions.zotero-openalex.correctArxivArticles";
 const OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF = "extensions.zotero-openalex.autoUpdateOnStartup";
 const OPENALEX_STALE_MONTHS_PREF = "extensions.zotero-openalex.staleMonths";
+const OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF =
+  "extensions.zotero-openalex.showGraphTuningControls";
 const OPENALEX_TEST_WORK_PATH = "doi%3A10.7717%2Fpeerj.4375";
 let openAlexPaneInitialized = false;
 
@@ -109,10 +111,21 @@ function initOpenAlexPreferencesPane() {
   const autoUpdateCheckbox = document.getElementById("auto-update-on-startup");
   const staleMonthsInput = document.getElementById("stale-months");
   const arxivCheckbox = document.getElementById("openalex-correct-arxiv");
+  const showGraphTuningControlsCheckbox = document.getElementById(
+    "openalex-show-graph-tuning-controls",
+  );
   const inputEl = document.getElementById("openalex-api-key-input");
   const clearBtn = document.getElementById("openalex-api-key-clear");
   const testBtn = document.getElementById("openalex-api-key-test");
-  if (!autoUpdateCheckbox || !staleMonthsInput || !arxivCheckbox || !inputEl || !clearBtn || !testBtn) {
+  if (
+    !autoUpdateCheckbox ||
+    !staleMonthsInput ||
+    !arxivCheckbox ||
+    !showGraphTuningControlsCheckbox ||
+    !inputEl ||
+    !clearBtn ||
+    !testBtn
+  ) {
     return;
   }
 
@@ -130,6 +143,10 @@ function initOpenAlexPreferencesPane() {
 
   const storedValue = Zotero.Prefs.get("extensions.zotero-openalex.apiKey", true) || "";
   inputEl.value = storedValue;
+  showGraphTuningControlsCheckbox.checked = getBooleanPrefValue(
+    OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF,
+    false,
+  );
 
   autoUpdateCheckbox.addEventListener("command", () => {
     Zotero.Prefs.set(
@@ -149,6 +166,14 @@ function initOpenAlexPreferencesPane() {
 
   arxivCheckbox.addEventListener("command", () => {
     Zotero.Prefs.set(OPENALEX_CORRECT_ARXIV_PREF, Boolean(arxivCheckbox.checked), true);
+  });
+
+  showGraphTuningControlsCheckbox.addEventListener("command", () => {
+    Zotero.Prefs.set(
+      OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF,
+      Boolean(showGraphTuningControlsCheckbox.checked),
+      true,
+    );
   });
 
   const saveHandler = () => {

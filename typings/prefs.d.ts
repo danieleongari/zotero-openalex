@@ -14,6 +14,7 @@ declare namespace _ZoteroTypes {
       "requestDelayMs": number;
       "startupDelayMs": number;
       "showStartupSummary": boolean;
+      "showGraphTuningControls": boolean;
       "apiKey": string;
     };
   }

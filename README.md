@@ -41,18 +41,17 @@ When enabled, startup sync scans regular items and updates those that are missin
 
 ### Usage: Custom Settings
 
-These settings could be customized in the Settings panel of Zotero dedicated to the plugin (in Windows: Edit > Settings):
+The main settings can be customized in the Zotero plugin settings panel (Windows: Edit > Settings):
 
 - `apiKey` (default empty): optional OpenAlex API key.
 - `autoUpdateOnStartup` (default `true`): check items for updates at startup.
 - `staleMonths` (default `3`): months after which the number of citations is updated.
 - `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
+- `showGraphTuningControls` (default `false`): show tunable graph coefficients directly in the Citation Graph window.
 
-These other settings are just in `extensions.zotero-openalex.*`:
+When `showGraphTuningControls` is enabled, the Citation Graph window shows a tuning panel with all physics coefficients and a `Regenerate` button.
 
-- `requestDelayMs` (default `1000`): delay between OpenAlex API calls during startup sync.
-- `startupDelayMs` (default `3000`): delay before startup sync begins after Zotero startup.
-- `showStartupSummary` (default `true`): show startup status/summary window.
+These and other settings are also customizable via: Edit > Settings > Advanced > Config Editor > `extensions.zotero-openalex.*`
 
 ### Usage: Optional API key
 

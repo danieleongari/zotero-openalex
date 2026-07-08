@@ -1,4 +1,9 @@
-import { renderCollectionCitationGraphWindow } from "./citationGraphWindow";
+import {
+  GRAPH_PHYSICS_FIELD_CONFIG,
+  GRAPH_PHYSICS_FIELD_KEYS,
+  renderCollectionCitationGraphWindow,
+  type GraphPhysicsSettings,
+} from "./citationGraphWindow";
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 const WORK_ID_PREFIX = "openalex.work_id:";
@@ -10,6 +15,7 @@ const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
+const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[\-._;()/:A-Z0-9]+\b/i;
 const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
@@ -489,13 +495,13 @@ class OpenAlexWorkIDClass {
         return;
       }
 
-      updateProgress(
-        `Done: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`,
-        100,
-      );
+      updateProgress(`Done: ${graphData.nodes.length} nodes, ${graphData.edges.length} edges`, 100);
 
       if (graphWindow && !graphWindow.closed) {
-        renderCollectionCitationGraphWindow(graphWindow, graphData);
+        renderCollectionCitationGraphWindow(graphWindow, graphData, {
+          physics: getGraphPhysicsSettings(),
+          showTuningControls: getBooleanPref(GRAPH_SHOW_TUNING_CONTROLS_PREF, false),
+        });
       } else {
         openCollectionCitationGraphWindow(graphData);
       }
@@ -853,9 +859,7 @@ function collectCollectionItemsRecursively(rootCollection: Zotero.Collection): G
 
 function collectLibraryItemsRecursively(libraryID: number, libraryName: string): GraphScopeData {
   const libraryCollections = Zotero.Collections.getByLibrary(libraryID, false) || [];
-  const topLevelCollections = libraryCollections.filter(
-    (collection) => !collection.parentID,
-  );
+  const topLevelCollections = libraryCollections.filter((collection) => !collection.parentID);
 
   return collectItemsFromCollectionRoots(
     topLevelCollections.map((collection) => ({
@@ -897,10 +901,8 @@ function collectItemsFromCollectionRoots(
       collectionPathsByItemID.get(item.id)?.add(current.path);
     }
 
-    const childCollections = ((currentCollection as any).getChildCollections?.(
-      false,
-      false,
-    ) || []) as Zotero.Collection[];
+    const childCollections = ((currentCollection as any).getChildCollections?.(false, false) ||
+      []) as Zotero.Collection[];
 
     for (const child of childCollections) {
       if (!seenCollectionIDs.has(child.id)) {
@@ -957,18 +959,14 @@ function extractPublisherForHover(item: Zotero.Item) {
 }
 
 function extractLocalNodeAuthorAndDate(item: Zotero.Item) {
-  const creators = (((item as any).getCreators?.() || []) as any[]).filter(
-    (creator) => creator,
-  );
+  const creators = (((item as any).getCreators?.() || []) as any[]).filter((creator) => creator);
   const authorLikeCreators = creators.filter((creator) => {
     const typeName = getCreatorTypeName(creator);
     return typeName === "author" || typeName === "inventor";
   });
   const creatorsForHover = authorLikeCreators.length ? authorLikeCreators : creators;
 
-  let firstAuthor = creatorsForHover.length
-    ? formatCreatorName(creatorsForHover[0])
-    : undefined;
+  let firstAuthor = creatorsForHover.length ? formatCreatorName(creatorsForHover[0]) : undefined;
   let lastAuthor = creatorsForHover.length
     ? formatCreatorName(creatorsForHover[creatorsForHover.length - 1])
     : undefined;
@@ -1011,9 +1009,7 @@ function formatCreatorName(creator: any): string | undefined {
 }
 
 function getCreatorTypeName(creator: any) {
-  const directType = String(
-    creator?.creatorType || creator?.creatorTypeName || "",
-  )
+  const directType = String(creator?.creatorType || creator?.creatorTypeName || "")
     .trim()
     .toLowerCase();
   if (directType) {
@@ -1021,10 +1017,7 @@ function getCreatorTypeName(creator: any) {
   }
 
   const creatorTypeID = Number.parseInt(String(creator?.creatorTypeID), 10);
-  if (
-    Number.isFinite(creatorTypeID) &&
-    (Zotero as any).CreatorTypes?.getName
-  ) {
+  if (Number.isFinite(creatorTypeID) && (Zotero as any).CreatorTypes?.getName) {
     try {
       return String((Zotero as any).CreatorTypes.getName(creatorTypeID) || "")
         .trim()
@@ -1068,7 +1061,10 @@ function openCollectionCitationGraphWindow(graphData: CollectionGraphData) {
   if (!popup) {
     throw new Error("Unable to open graph window.");
   }
-  renderCollectionCitationGraphWindow(popup, graphData);
+  renderCollectionCitationGraphWindow(popup, graphData, {
+    physics: getGraphPhysicsSettings(),
+    showTuningControls: getBooleanPref(GRAPH_SHOW_TUNING_CONTROLS_PREF, false),
+  });
 }
 
 function openCollectionCitationGraphShellWindow() {
@@ -1137,12 +1133,85 @@ function openCollectionCitationGraphShellWindow() {
   <meta charset="utf-8" />
   <title>OpenAlex Citation Graph</title>
   <style>
-    body { font-family: "Segoe UI", "Noto Sans", sans-serif; margin: 0; display: grid; place-items: center; min-height: 100vh; background: #f4f8fc; color: #1f3347; }
-    .card { background: #fff; border: 1px solid #d5e2ef; border-radius: 10px; padding: 16px 20px; }
+    :root {
+      color-scheme: dark;
+      --bg-0: #0d121a;
+      --bg-1: #131b27;
+      --panel: rgba(17, 26, 38, 0.9);
+      --border: #2b3d53;
+      --text: #d6e4f2;
+      --muted: #8ca3bb;
+      --accent: #53a1ff;
+    }
+
+    body {
+      font-family: "Segoe UI", "Noto Sans", sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background:
+        radial-gradient(1200px 650px at 110% -8%, rgba(58, 109, 171, 0.24), transparent 70%),
+        radial-gradient(900px 600px at -20% 120%, rgba(88, 53, 131, 0.16), transparent 75%),
+        linear-gradient(165deg, var(--bg-1), var(--bg-0));
+      color: var(--text);
+    }
+
+    .card {
+      width: min(560px, calc(100% - 32px));
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      box-shadow: 0 12px 34px rgba(3, 8, 13, 0.35);
+      backdrop-filter: blur(3px);
+    }
+
+    .title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e8f4ff;
+      letter-spacing: 0.01em;
+      margin-bottom: 6px;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .status::before {
+      content: "";
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      margin-right: 8px;
+      background: var(--accent);
+      box-shadow: 0 0 0 5px rgba(83, 161, 255, 0.16);
+      vertical-align: middle;
+      animation: pulse 1.25s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%,
+      100% {
+        transform: scale(1);
+        opacity: 1;
+      }
+      50% {
+        transform: scale(0.85);
+        opacity: 0.72;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="card" id="graph-loading-status">Building citation graph...</div>
+  <div class="card">
+    <div class="title">OpenAlex Citation Graph</div>
+    <div class="status" id="graph-loading-status">Building citation graph...</div>
+  </div>
 </body>
 </html>`;
   popup.document.open();
@@ -1505,6 +1574,31 @@ function getNumberPref(key: string, fallback: number) {
   } catch (_error) {
     return fallback;
   }
+}
+
+function getFloatPref(key: string, fallback: number, min: number, max: number) {
+  try {
+    const value = Zotero.Prefs.get(`extensions.zotero-openalex.${key}`, true);
+    const numeric = Number.parseFloat(String(value));
+    if (!Number.isFinite(numeric)) {
+      return fallback;
+    }
+    return Math.max(min, Math.min(max, numeric));
+  } catch (_error) {
+    return fallback;
+  }
+}
+
+function getGraphPhysicsSettings(): GraphPhysicsSettings {
+  const next = {} as GraphPhysicsSettings;
+
+  for (let i = 0; i < GRAPH_PHYSICS_FIELD_KEYS.length; i++) {
+    const key = GRAPH_PHYSICS_FIELD_KEYS[i];
+    const config = GRAPH_PHYSICS_FIELD_CONFIG[key];
+    next[key] = getFloatPref(config.prefSuffix, config.default, config.min, config.max);
+  }
+
+  return next;
 }
 
 function getOpenAlexAPIKey() {
