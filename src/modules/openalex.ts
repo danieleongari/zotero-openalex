@@ -143,7 +143,14 @@ class OpenAlexWorkIDClass {
     const onItemPopupShowing = () => {
       const pane = Zotero.getActiveZoteroPane();
       const selectedItems = pane ? pane.getSelectedItems() : [];
-      (menuItem as any).hidden = selectedItems.length === 0;
+      const hasEligibleParentSelection = selectedItems.some((item) => {
+        try {
+          return item.isRegularItem() && item.isTopLevelItem();
+        } catch (_error) {
+          return false;
+        }
+      });
+      (menuItem as any).hidden = !hasEligibleParentSelection;
     };
     itemMenuPopup.addEventListener("popupshowing", onItemPopupShowing);
 
