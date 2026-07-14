@@ -38,6 +38,14 @@ async function onMainWindowUnload({ window }, reason) {
 
 async function shutdown({ id, version, resourceURI, rootURI }, reason) {
     if (reason === APP_SHUTDOWN) {
+        // Zotero skips normal add-on cleanup while the application is
+        // quitting, but custom Sqlite.sys.mjs connections must still be
+        // closed before the profile shutdown barrier.
+        try {
+            await Zotero.__addonInstance__?.hooks.onAppShutdown();
+        } catch (error) {
+            Zotero.logError(error);
+        }
         return;
     }
 

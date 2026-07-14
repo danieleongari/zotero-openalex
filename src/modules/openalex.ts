@@ -4,6 +4,7 @@ import {
   renderCollectionCitationGraphWindow,
   type GraphPhysicsSettings,
 } from "./citationGraphWindow";
+import { OpenAlexStore, type OpenAlexWorkPayload } from "./openalexStore";
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 const WORK_ID_PREFIX = "openalex.work_id:";
@@ -38,15 +39,9 @@ interface UpdateOutcome {
   message?: string;
 }
 
-interface OpenAlexWork {
-  id?: string;
-  cited_by_count?: number | string;
-}
-
-interface OpenAlexGraphWork extends OpenAlexWork {
+interface OpenAlexWork extends OpenAlexWorkPayload {
   display_name?: string;
   publication_year?: number | string;
-  referenced_works?: string[];
 }
 
 interface CollectionGraphNode {
@@ -94,6 +89,7 @@ let citationColumnRegistrationToken: string | null = null;
 let startupInfoWindow: any = null;
 let startupInfoUsesLineAPI = false;
 let openAlexLastErrorMessage = "";
+const openAlexStore = new OpenAlexStore();
 
 class OpenAlexWorkIDClass {
   private id = "";
@@ -362,7 +358,7 @@ class OpenAlexWorkIDClass {
         continue;
       }
 
-      const outcome = await this.updateSingleItem(item, { refreshCitationDate: true });
+      const outcome = await this.updateSingleItem(item);
       if (outcome.status === "updated") {
         updatedCount++;
       } else if (outcome.status === "unchanged") {
@@ -389,10 +385,7 @@ class OpenAlexWorkIDClass {
     }
   }
 
-  async updateSingleItem(
-    item: Zotero.Item,
-    { refreshCitationDate = false } = {},
-  ): Promise<UpdateOutcome> {
+  async updateSingleItem(item: Zotero.Item): Promise<UpdateOutcome> {
     if (!item || !item.isRegularItem()) {
       return { status: "skipped", message: "Item is not a regular Zotero item." };
     }
@@ -445,33 +438,17 @@ class OpenAlexWorkIDClass {
       return { status: "skipped", message: "No matching OpenAlex Work found." };
     }
 
-    const fetchedWorkID = normalizeOpenAlexID(apiWork.id) || current.workID;
-    const fetchedCitationCount = normalizeCitationCount(apiWork.cited_by_count);
-    const shouldReplaceCitation =
-      fetchedCitationCount !== null &&
-      (refreshCitationDate || fetchedCitationCount !== current.citationCount);
-
-    const updatedExtra = upsertOpenAlexMetadata(extra, {
-      workID: fetchedWorkID,
-      replaceCitation: shouldReplaceCitation,
-      citationCount: fetchedCitationCount,
-    });
-    const extraChanged = updatedExtra !== extra;
-    const openAlexURL = fetchedWorkID ? `https://openalex.org/works/${fetchedWorkID}` : null;
-    const urlChanged = openAlexURL !== null && item.getField("url") !== openAlexURL;
-
-    if (!extraChanged && !urlChanged && !itemChanged) {
-      return { status: "unchanged" };
+    try {
+      await synchronizeItemsWithWork([item], apiWork, itemChanged ? new Set([item.id]) : undefined);
+      return { status: "updated" };
+    } catch (error) {
+      Zotero.debug(`OpenAlex: failed synchronizing item ${item.id}`);
+      Zotero.debug(error);
+      return {
+        status: "skipped",
+        message: `OpenAlex metadata could not be saved: ${String(error)}`,
+      };
     }
-
-    if (extraChanged) {
-      item.setField("extra", updatedExtra);
-    }
-    if (urlChanged) {
-      item.setField("url", openAlexURL);
-    }
-    await item.saveTx();
-    return { status: "updated" };
   }
 
   async openCollectionCitationGraph(window: Window) {
@@ -532,6 +509,7 @@ class OpenAlexWorkIDClass {
 
   async main() {
     await waitForZoteroReady();
+    await openAlexStore.initialize();
 
     this.addToAllWindows();
     this.registerCitationColumn();
@@ -592,10 +570,15 @@ class OpenAlexWorkIDClass {
         allRegularItems = [];
       }
 
+      const knownWorkIDs = allRegularItems
+        .map((item) => parseOpenAlexMetadata((item.getField("extra") as string) || "").workID)
+        .filter((workID): workID is string => Boolean(workID));
+      const cachedWorkIDs = new Set((await openAlexStore.getWorks(knownWorkIDs)).keys());
+
       const candidates: Zotero.Item[] = [];
       for (const item of allRegularItems) {
         try {
-          if (shouldUpdateOnStartup(item, staleMonths)) {
+          if (shouldUpdateOnStartup(item, staleMonths, cachedWorkIDs)) {
             candidates.push(item);
           }
         } catch (error) {
@@ -624,7 +607,7 @@ class OpenAlexWorkIDClass {
         const item = candidates[i];
         let outcome: UpdateOutcome;
         try {
-          outcome = await this.updateSingleItem(item, { refreshCitationDate: true });
+          outcome = await this.updateSingleItem(item);
         } catch (error) {
           Zotero.debug(`OpenAlex startup sync: item ${item.id} failed`);
           Zotero.debug(error);
@@ -678,9 +661,72 @@ class OpenAlexWorkIDClass {
       startupSyncInProgress = false;
     }
   }
+
+  async shutdown() {
+    await openAlexStore.close();
+  }
 }
 
 export const openAlexWorkID = new OpenAlexWorkIDClass();
+
+async function synchronizeItemsWithWork(
+  items: Zotero.Item[],
+  apiWork: OpenAlexWork,
+  forceSaveItemIDs: ReadonlySet<number> = new Set(),
+) {
+  const workID = normalizeOpenAlexID(apiWork.id);
+  if (!workID) {
+    throw new Error("OpenAlex returned a Work without a valid ID.");
+  }
+
+  const syncedAt = new Date();
+  const fetchedAt = syncedAt.toISOString();
+  const citationCount = normalizeCitationCount(apiWork.cited_by_count);
+  const openAlexURL = `https://openalex.org/works/${workID}`;
+  const snapshots = items.map((item) => ({
+    item,
+    extra: ((item.getField("extra") as string) || "").toString(),
+    url: ((item.getField("url") as string) || "").toString(),
+  }));
+  const savedItemIDs = new Set<number>();
+
+  try {
+    await openAlexStore.executeTransaction(async () => {
+      await openAlexStore.upsertWork(workID, apiWork, fetchedAt);
+
+      for (const snapshot of snapshots) {
+        const updatedExtra = upsertOpenAlexMetadata(snapshot.extra, {
+          workID,
+          replaceCitation: true,
+          citationCount,
+          citationDate: syncedAt,
+        });
+        const extraChanged = updatedExtra !== snapshot.extra;
+        const urlChanged = snapshot.url !== openAlexURL;
+        if (!extraChanged && !urlChanged && !forceSaveItemIDs.has(snapshot.item.id)) continue;
+
+        if (extraChanged) snapshot.item.setField("extra", updatedExtra);
+        if (urlChanged) snapshot.item.setField("url", openAlexURL);
+        await snapshot.item.saveTx();
+        savedItemIDs.add(snapshot.item.id);
+      }
+    });
+  } catch (error) {
+    for (const snapshot of snapshots) {
+      snapshot.item.setField("extra", snapshot.extra);
+      snapshot.item.setField("url", snapshot.url);
+      if (!savedItemIDs.has(snapshot.item.id)) continue;
+
+      try {
+        await snapshot.item.saveTx();
+      } catch (restoreError) {
+        Zotero.debug(`OpenAlex: failed restoring item ${snapshot.item.id} after cache failure`);
+        Zotero.debug(restoreError);
+      }
+    }
+    throw error;
+  }
+}
 
 function getCollectionMenuPopup(doc: Document) {
   return doc.querySelector("#zotero-collectionmenu");
@@ -797,30 +843,70 @@ async function buildCitationGraphDataFromScope(
     };
   }
 
-  updateProgress("Fetching OpenAlex references...", 18);
+  updateProgress("Loading cached OpenAlex metadata...", 18);
 
   const nodeIDsByWorkID = new Map<string, string[]>();
+  const itemsByWorkID = new Map<string, Zotero.Item[]>();
+  const scopedItemsByID = new Map<number, Zotero.Item>();
+  for (const item of scopedItems) scopedItemsByID.set(item.id, item);
+
   for (const node of eligibleNodes) {
     const current = nodeIDsByWorkID.get(node.workID) || [];
     current.push(node.id);
     nodeIDsByWorkID.set(node.workID, current);
+
+    const item = scopedItemsByID.get(node.itemID);
+    if (item) {
+      const workItems = itemsByWorkID.get(node.workID) || [];
+      workItems.push(item);
+      itemsByWorkID.set(node.workID, workItems);
+    }
   }
 
+  const uniqueWorkIDs = [...nodeIDsByWorkID.keys()];
+  const storedWorks = await openAlexStore.getWorks(uniqueWorkIDs);
+  const workCache = new Map<string, OpenAlexWork>();
+  for (const [workID, storedWork] of storedWorks) {
+    workCache.set(workID, storedWork.metadata as OpenAlexWork);
+  }
+
+  const missingWorkIDs = uniqueWorkIDs.filter((workID) => !workCache.has(workID));
   const requestDelayMs = Math.max(0, getNumberPref("requestDelayMs", 1000));
-  const workCache = new Map<string, OpenAlexGraphWork | null>();
+  for (let index = 0; index < missingWorkIDs.length; index++) {
+    const workID = missingWorkIDs[index];
+    const progress = 20 + Math.floor((index / Math.max(1, missingWorkIDs.length)) * 36);
+    updateProgress(
+      `Fetching missing OpenAlex metadata ${index + 1}/${missingWorkIDs.length}...`,
+      progress,
+    );
+
+    try {
+      const work = await fetchOpenAlexWorkByID(workID);
+      if (!work || normalizeOpenAlexID(work.id) !== workID) {
+        throw new Error(`No valid OpenAlex Work returned for ${workID}.`);
+      }
+      await synchronizeItemsWithWork(itemsByWorkID.get(workID) || [], work);
+      workCache.set(workID, work);
+    } catch (error) {
+      Zotero.debug(`OpenAlex graph: failed filling cache for ${workID}`);
+      Zotero.debug(error);
+    }
+
+    if (requestDelayMs > 0 && index < missingWorkIDs.length - 1) {
+      await delay(requestDelayMs);
+    }
+  }
+
   const edgeKeySet = new Set<string>();
-  let fetchFailures = 0;
+  const fetchFailures = eligibleNodes.filter((node) => !workCache.has(node.workID)).length;
 
   for (let index = 0; index < eligibleNodes.length; index++) {
     const source = eligibleNodes[index];
-    const progress = 18 + Math.floor((index / eligibleNodes.length) * 76);
+    const progress = 58 + Math.floor((index / eligibleNodes.length) * 36);
     updateProgress(`Reading references for ${index + 1}/${eligibleNodes.length}...`, progress);
 
-    const work = await fetchOpenAlexGraphWorkByID(source.workID, workCache);
-    if (!work) {
-      fetchFailures++;
-      continue;
-    }
+    const work = workCache.get(source.workID);
+    if (!work) continue;
 
     const openAlexCitationCount = normalizeCitationCount(work.cited_by_count);
     if (openAlexCitationCount !== null) {
@@ -838,10 +924,6 @@ async function buildCitationGraphDataFromScope(
         if (targetNodeID === source.id) continue;
         edgeKeySet.add(`${source.id}|${targetNodeID}`);
       }
-    }
-
-    if (requestDelayMs > 0 && index < eligibleNodes.length - 1) {
-      await delay(requestDelayMs);
     }
   }
 
@@ -1046,26 +1128,6 @@ function normalizeYear(value: string | undefined) {
   if (!value) return null;
   const match = String(value).match(/\b(18|19|20|21)\d{2}\b/);
   return match ? Number.parseInt(match[0], 10) : null;
-}
-
-async function fetchOpenAlexGraphWorkByID(
-  workID: string,
-  cache: Map<string, OpenAlexGraphWork | null>,
-) {
-  const normalizedWorkID = normalizeOpenAlexID(workID);
-  if (!normalizedWorkID) return null;
-
-  if (cache.has(normalizedWorkID)) {
-    return cache.get(normalizedWorkID) || null;
-  }
-
-  const params = buildOpenAlexParams({
-    select: "id,display_name,publication_year,referenced_works,cited_by_count",
-  });
-  const url = `${OPENALEX_BASE_URL}/works/${normalizedWorkID}?${params.toString()}`;
-  const work = (await requestOpenAlexJSON(url)) as OpenAlexGraphWork | null;
-  cache.set(normalizedWorkID, work || null);
-  return work || null;
 }
 
 function openCollectionCitationGraphWindow(graphData: CollectionGraphData) {
@@ -1300,7 +1362,13 @@ function upsertOpenAlexMetadata(
     workID,
     replaceCitation,
     citationCount,
-  }: { workID: string | null; replaceCitation: boolean; citationCount: number | null },
+    citationDate = new Date(),
+  }: {
+    workID: string | null;
+    replaceCitation: boolean;
+    citationCount: number | null;
+    citationDate?: Date;
+  },
 ) {
   const lines = (extra || "").split(/\r?\n/);
   let updatedLines = lines;
@@ -1316,11 +1384,11 @@ function upsertOpenAlexMetadata(
         !CIT_COUNT_LINE_PATTERN.test(line.trim()) && !CIT_DATE_LINE_PATTERN.test(line.trim()),
     );
     if (typeof citationCount === "number" && citationCount >= 0) {
-      const citationDate = formatDate(new Date());
+      const formattedCitationDate = formatDate(citationDate);
       insertBeforeMatch(
         updatedLines,
         CITATION_KEY_LINE_PATTERN,
-        `${CIT_DATE_PREFIX} ${citationDate}`,
+        `${CIT_DATE_PREFIX} ${formattedCitationDate}`,
       );
       insertBeforeMatch(
         updatedLines,
@@ -1524,7 +1592,11 @@ function isCitationStale(citationDate: Date | null, staleMonths: number) {
   return citationDate < cutoff;
 }
 
-function shouldUpdateOnStartup(item: Zotero.Item, staleMonths: number) {
+function shouldUpdateOnStartup(
+  item: Zotero.Item,
+  staleMonths: number,
+  cachedWorkIDs?: ReadonlySet<string>,
+) {
   if (!item || !item.isRegularItem()) return false;
 
   const extra = (item.getField("extra") as string) || "";
@@ -1535,6 +1607,7 @@ function shouldUpdateOnStartup(item: Zotero.Item, staleMonths: number) {
   if (!hasLookupIdentifier) return false;
 
   if (!metadata.workID) return true;
+  if (cachedWorkIDs && !cachedWorkIDs.has(metadata.workID)) return true;
   if (metadata.citationCount === null) return true;
 
   return isCitationStale(metadata.citationDate, staleMonths);
@@ -1622,10 +1695,7 @@ function getOpenAlexAPIKey() {
 }
 
 function buildOpenAlexParams(initialValues: Record<string, string> = {}) {
-  const params = new URLSearchParams({
-    select: "id,cited_by_count",
-    ...initialValues,
-  });
+  const params = new URLSearchParams(initialValues);
 
   const apiKey = String(getOpenAlexAPIKey()).trim();
   if (apiKey) params.set("api_key", apiKey);
@@ -1640,7 +1710,7 @@ async function fetchOpenAlexWorkByDOI(doi: string) {
   const params = buildOpenAlexParams();
   const encodedDOI = encodeURIComponent(`doi:${normalizedDOI}`);
   const url = `${OPENALEX_BASE_URL}/works/${encodedDOI}?${params.toString()}`;
-  const byPath = await requestOpenAlexJSON(url);
+  const byPath = (await requestOpenAlexJSON(url)) as OpenAlexWork | null;
   if (byPath?.id) return byPath;
 
   const fallbackParams = buildOpenAlexParams({
@@ -1663,7 +1733,7 @@ async function fetchOpenAlexWorkByID(workID: string) {
 
   const params = buildOpenAlexParams();
   const url = `${OPENALEX_BASE_URL}/works/${normalizedWorkID}?${params.toString()}`;
-  return requestOpenAlexJSON(url);
+  return (await requestOpenAlexJSON(url)) as OpenAlexWork | null;
 }
 
 async function requestOpenAlexJSON(url: string): Promise<any> {
@@ -1852,6 +1922,7 @@ async function waitForZoteroReady() {
 export const __test__ = {
   parseOpenAlexMetadata,
   upsertOpenAlexMetadata,
+  shouldUpdateOnStartup,
   normalizeDOI,
   extractArXivIDFromURL,
   normalizeArXivID,

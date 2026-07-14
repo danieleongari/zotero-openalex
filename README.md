@@ -10,13 +10,18 @@ It stores machine-readable fields in each item's `Extra` field:
 
 Only `openalex.*` lines are parsed and managed by the plugin.
 
+The complete OpenAlex Work response is also cached locally in
+`zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
+OpenAlex Work ID and is not synchronized through Zotero Sync.
+
 ## What the plugin does
 
-- Uses DOI-based lookup against the OpenAlex API to retrieve WorkID (OpenAlex indexing for articles) and number of citations.
+- Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata.
 - Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
+- Stores the complete OpenAlex Work JSON in a local SQLite database.
 - Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
 - Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Citation Graph..." showing which article is citing what, among the items in the Collection or its SubCollections
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Citation Graph..." showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
 
 ## Installation
 
@@ -37,7 +42,9 @@ For a single item, Zotero shows a direct result message. For multiple items, Zot
 
 ### Usage: Startup sync
 
-When enabled, startup sync scans regular items and updates those that are missing metadata or have stale citation dates.
+When enabled, startup sync scans regular items and updates those that are missing metadata, have
+stale citation dates, or do not yet have a complete SQLite cache record. The first startup after
+installing this version can therefore take longer while existing `Extra` metadata is backfilled.
 
 ### Usage: Custom Settings
 
@@ -65,13 +72,17 @@ Get an OpenAlex API key at:
 
 - Existing `openalex.work_id`, `openalex.cit_count`, and `openalex.cit_date` lines are replaced when updated.
 - New lines are inserted before `Citation Key:` when present, otherwise appended.
-- Citation date is updated when citation count changes or when refresh is forced.
+- Citation date is updated whenever a complete OpenAlex refresh is saved.
+- URL, `Extra`, and SQLite writes use the same fetched Work and timestamp. If one datastore fails,
+  the plugin attempts to restore the previous values.
 
 ## Privacy notes
 
 - The API key is stored in local Zotero preferences.
 - The plugin does not write your API key into item metadata.
 - Requests are sent to the OpenAlex API endpoint (`https://api.openalex.org`).
+- Complete Work responses are stored locally in `zotero-openalex.sqlite`. This file remains on the
+  device and is not synchronized through Zotero Sync.
 
 ## Development (Developer)
 
@@ -130,6 +141,7 @@ npm run release
 - `src/addon.ts`: addon state container.
 - `src/hooks.ts`: lifecycle hooks (`onStartup`, window load/unload, shutdown).
 - `src/modules/openalex.ts`: OpenAlex logic, metadata parsing/upsert, menu wiring, startup sync, citations column.
+- `src/modules/openalexStore.ts`: versioned SQLite storage for complete OpenAlex Work responses.
 - `addon/`: runtime assets (`manifest.json`, `bootstrap.js`, prefs/panes assets).
 - `zotero-plugin.config.ts`: scaffold build and release configuration.
 
@@ -138,6 +150,8 @@ npm run release
 - If API calls fail with `401/403`, verify the API key.
 - If updates are skipped, verify the item has a DOI (field or `Extra`).
 - If startup sync feels slow, increase `requestDelayMs` cautiously and adjust `staleMonths`.
+- If the first sync after upgrading is slow, allow it to finish populating `zotero-openalex.sqlite`.
+  Later citation graphs will reuse these cached Work records.
 
 ## Acknowledgements
 
