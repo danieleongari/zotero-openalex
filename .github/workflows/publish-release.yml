@@ -1,0 +1,72 @@
+name: Publish release artifacts
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable release tag to build and publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.release.tag_name }}
+    steps:
+      - name: Validate release tag
+        run: |
+          [[ "$TAG_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$TAG_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+      - name: Check out released tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ env.TAG_NAME }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build release
+        run: npm run build
+
+      - name: Validate release artifacts
+        run: |
+          expected_version="${TAG_NAME#v}"
+          test -f .scaffold/build/zotero-openalex.xpi
+          test -f .scaffold/build/update.json
+          xpi_version="$(unzip -p .scaffold/build/zotero-openalex.xpi manifest.json | jq -r '.version')"
+          update_version="$(jq -r '.addons["zotero-openalex@example.com"].updates[0].version' .scaffold/build/update.json)"
+          update_link="$(jq -r '.addons["zotero-openalex@example.com"].updates[0].update_link' .scaffold/build/update.json)"
+          update_hash="$(jq -r '.addons["zotero-openalex@example.com"].updates[0].update_hash' .scaffold/build/update.json)"
+          actual_hash="sha512:$(sha512sum .scaffold/build/zotero-openalex.xpi | cut -d ' ' -f 1)"
+          test "$xpi_version" = "$expected_version"
+          test "$update_version" = "$expected_version"
+          test "$update_link" = "https://github.com/danieleongari/zotero-openalex/releases/download/$TAG_NAME/zotero-openalex.xpi"
+          test "$update_hash" = "$actual_hash"
+
+      - name: Upload release artifacts
+        run: >-
+          gh release upload "$TAG_NAME"
+          .scaffold/build/zotero-openalex.xpi
+          .scaffold/build/update.json
+          --repo "$GITHUB_REPOSITORY"
+          --clobber

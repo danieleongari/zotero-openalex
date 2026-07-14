@@ -17,54 +17,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Create or update release PR
-        id: release
         uses: googleapis/release-please-action@0dfd8538845b8e92600d271a895a5372865d4062 # v5.0.0
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}
-
-      - name: Check out released tag
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          ref: ${{ steps.release.outputs.tag_name }}
-
-      - name: Set up Node.js
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        run: npm ci
-
-      - name: Build release
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        run: npm run build
-
-      - name: Validate release artifacts
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        env:
-          TAG_NAME: ${{ steps.release.outputs.tag_name }}
-        run: |
-          expected_version="${TAG_NAME#v}"
-          test -f .scaffold/build/zotero-openalex.xpi
-          test -f .scaffold/build/update.json
-          xpi_version="$(unzip -p .scaffold/build/zotero-openalex.xpi manifest.json | jq -r '.version')"
-          update_version="$(jq -r '.addons["zotero-openalex@example.com"].updates[0].version' .scaffold/build/update.json)"
-          update_link="$(jq -r '.addons["zotero-openalex@example.com"].updates[0].update_link' .scaffold/build/update.json)"
-          test "$xpi_version" = "$expected_version"
-          test "$update_version" = "$expected_version"
-          test "$update_link" = "https://github.com/danieleongari/zotero-openalex/releases/download/$TAG_NAME/zotero-openalex.xpi"
-
-      - name: Upload release artifacts
-        if: ${{ steps.release.outputs.release_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG_NAME: ${{ steps.release.outputs.tag_name }}
-        run: >-
-          gh release upload "$TAG_NAME"
-          .scaffold/build/zotero-openalex.xpi
-          .scaffold/build/update.json
-          --clobber

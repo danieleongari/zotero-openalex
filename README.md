@@ -175,10 +175,10 @@ Set an expiry date and rotate the token before it expires. The separate token is
 pull requests created with GitHub's default workflow token do not trigger the required PR checks.
 Never place the token in a file, workflow, issue, pull request, or log.
 
-If release publication fails after the tag and GitHub Release are created, fix the reported problem
-and rerun the failed `Release Please` workflow. Asset upload uses replacement semantics, so reruns
-are safe. A complete release must contain both assets above; its XPI manifest version and
-`update.json` version must match the release tag.
+If artifact publication fails after the tag and GitHub Release are created, fix the reported
+problem and run the `Publish release artifacts` workflow manually with the existing `vX.Y.Z` tag.
+Asset upload uses replacement semantics, so reruns are safe. A complete release must contain both
+assets above; its XPI manifest version and `update.json` version must match the release tag.
 
 ## Project structure (Developer)
 
