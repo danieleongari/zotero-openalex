@@ -457,13 +457,18 @@ class OpenAlexWorkIDClass {
       citationCount: fetchedCitationCount,
     });
     const extraChanged = updatedExtra !== extra;
+    const openAlexURL = fetchedWorkID ? `https://openalex.org/works/${fetchedWorkID}` : null;
+    const urlChanged = openAlexURL !== null && item.getField("url") !== openAlexURL;
 
-    if (!extraChanged && !itemChanged) {
+    if (!extraChanged && !urlChanged && !itemChanged) {
       return { status: "unchanged" };
     }
 
     if (extraChanged) {
       item.setField("extra", updatedExtra);
+    }
+    if (urlChanged) {
+      item.setField("url", openAlexURL);
     }
     await item.saveTx();
     return { status: "updated" };
