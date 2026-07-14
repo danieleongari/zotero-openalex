@@ -25,7 +25,6 @@
     "build": "zotero-plugin build && tsc --noEmit",
     "lint:check": "prettier --check . && eslint .",
     "lint:fix": "prettier --write . && eslint . --fix",
-    "release": "zotero-plugin release",
     "test": "zotero-plugin test"
   },
   "devDependencies": {

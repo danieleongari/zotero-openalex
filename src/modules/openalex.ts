@@ -18,7 +18,7 @@ const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
 const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
 
-const DOI_PATTERN = /\b10\.\d{4,9}\/[\-._;()/:A-Z0-9]+\b/i;
+const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i;
 const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
 const ARXIV_ID_MODERN_PATTERN = /^\d{4}\.\d{4,5}$/;
 const ARXIV_ID_LEGACY_PATTERN = /^[a-z-]+(?:\.[a-z-]+)?\/\d{7}$/i;

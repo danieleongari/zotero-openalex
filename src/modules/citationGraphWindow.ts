@@ -290,22 +290,22 @@ export const GRAPH_PHYSICS_FIELD_CONFIG: Record<GraphPhysicsFieldKey, GraphPhysi
     label: "Damping",
     description:
       "Velocity retention per tick. Higher values preserve momentum and can oscillate longer; lower values dissipate motion faster.",
-    min: 0.40,
+    min: 0.4,
     max: 0.99,
     step: 0.1,
     decimals: 2,
-    default: 0.50,
+    default: 0.5,
     prefSuffix: "graphDamping",
   },
   alphaDecay: {
     label: "Alpha decay",
     description:
       "Cooling factor of the simulation energy. Higher values cool more slowly for longer exploration; lower values settle faster.",
-    min: 0.900,
+    min: 0.9,
     max: 0.999,
     step: 0.001,
     decimals: 3,
-    default: 0.950,
+    default: 0.95,
     prefSuffix: "graphAlphaDecay",
   },
   alphaStop: {

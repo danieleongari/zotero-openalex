@@ -131,9 +131,54 @@ npm test
 
 ### Release
 
-```sh
-npm run release
-```
+Releases are automated with Release Please and GitHub Actions. Do not edit the version, create a
+release tag, build an XPI for publication, or edit `CHANGELOG.md` manually.
+
+Every change must be squash-merged through a pull request whose title follows Conventional
+Commits. The squash title becomes the commit on `main` and determines the next version:
+
+| Pull request title                     | Version effect       | Example                        |
+| -------------------------------------- | -------------------- | ------------------------------ |
+| `fix: ...`                             | Patch/bugfix         | `9.2.0` to `9.2.1`             |
+| `feat: ...`                            | Minor                | `9.2.0` to `9.3.0`             |
+| `feat!: ...` or another type with `!`  | Major/breaking       | `9.2.0` to `10.0.0`            |
+| `docs: ...`, `chore: ...`, `test: ...` | No release by itself | Included with the next release |
+
+By project convention, the plugin's major version matches the latest Zotero major version against
+which it has been tested. For example, plugin version `9.x` indicates testing against Zotero 9.
+This convention is documented but not enforced by CI, so use a breaking-change (`!`) title only
+when the corresponding major-version change is intentional.
+
+After a release-worthy PR is merged, Release Please opens or updates one rolling release PR. That
+PR contains the computed version and generated changelog. Review it like any other PR. Merging it
+creates the `vX.Y.Z` tag and GitHub Release, then CI builds and uploads:
+
+- `zotero-openalex.xpi`
+- `update.json`
+
+Zotero checks the stable
+[`update.json`](https://github.com/danieleongari/zotero-openalex/releases/latest/download/update.json)
+URL and downloads the versioned XPI referenced there. Generated release files are never committed
+to the repository.
+
+#### Release automation setup
+
+The Release Please workflow uses a fine-grained personal access token stored as the repository
+secret `RELEASE_PLEASE_TOKEN`. The token must be limited to this repository and have these
+repository permissions:
+
+- Contents: read and write
+- Issues: read and write
+- Pull requests: read and write
+
+Set an expiry date and rotate the token before it expires. The separate token is required because
+pull requests created with GitHub's default workflow token do not trigger the required PR checks.
+Never place the token in a file, workflow, issue, pull request, or log.
+
+If release publication fails after the tag and GitHub Release are created, fix the reported problem
+and rerun the failed `Release Please` workflow. Asset upload uses replacement semantics, so reruns
+are safe. A complete release must contain both assets above; its XPI manifest version and
+`update.json` version must match the release tag.
 
 ## Project structure (Developer)
 
