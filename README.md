@@ -144,6 +144,11 @@ Commits. The squash title becomes the commit on `main` and determines the next v
 | `feat!: ...` or another type with `!`  | Major/breaking       | `9.2.0` to `10.0.0`            |
 | `docs: ...`, `chore: ...`, `test: ...` | No release by itself | Included with the next release |
 
+By project convention, the plugin's major version matches the latest Zotero major version against
+which it has been tested. For example, plugin version `9.x` indicates testing against Zotero 9.
+This convention is documented but not enforced by CI, so use a breaking-change (`!`) title only
+when the corresponding major-version change is intentional.
+
 After a release-worthy PR is merged, Release Please opens or updates one rolling release PR. That
 PR contains the computed version and generated changelog. Review it like any other PR. Merging it
 creates the `vX.Y.Z` tag and GitHub Release, then CI builds and uploads:
