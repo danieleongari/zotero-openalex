@@ -43,6 +43,12 @@ async function onMainWindowUnload(win: _ZoteroTypes.MainWindow) {
 async function onShutdown() {
   openAlexWorkID.removeFromAllWindows();
   openAlexWorkID.unregisterCitationColumn();
+  try {
+    await openAlexWorkID.shutdown();
+  } catch (error) {
+    Zotero.debug("OpenAlex: failed closing metadata database.");
+    Zotero.debug(error);
+  }
   addon.data.alive = false;
   delete (Zotero as any)[addon.data.config.addonInstance];
 }
