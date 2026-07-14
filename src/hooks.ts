@@ -53,9 +53,14 @@ async function onShutdown() {
   delete (Zotero as any)[addon.data.config.addonInstance];
 }
 
+async function onAppShutdown() {
+  await openAlexWorkID.shutdown();
+}
+
 export default {
   onStartup,
   onMainWindowLoad,
   onMainWindowUnload,
   onShutdown,
+  onAppShutdown,
 };
