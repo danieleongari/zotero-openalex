@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.4.0](https://github.com/danieleongari/zotero-openalex/compare/v9.3.0...v9.4.0) (2026-07-18)
+
+
+### Features
+
+* prevent citation graph title overlaps ([#14](https://github.com/danieleongari/zotero-openalex/issues/14)) ([8c78864](https://github.com/danieleongari/zotero-openalex/commit/8c78864a5f1f2d67bddc185e4120120e8d50fd44))
+
 ## [9.3.0](https://github.com/danieleongari/zotero-openalex/compare/v9.2.0...v9.3.0) (2026-07-18)
 
 
