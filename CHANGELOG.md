@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.3.0](https://github.com/danieleongari/zotero-openalex/compare/v9.2.0...v9.3.0) (2026-07-18)
+
+
+### Features
+
+* improve citation graph wheel zoom ([#12](https://github.com/danieleongari/zotero-openalex/issues/12)) ([96649e0](https://github.com/danieleongari/zotero-openalex/commit/96649e011030176f4f0b1a886ffc7f52a62c499b))
+
 ## [9.2.0](https://github.com/danieleongari/zotero-openalex/compare/zotero-openalex-v9.1.0...zotero-openalex-v9.2.0) (2026-07-14)
 
 
