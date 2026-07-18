@@ -120,6 +120,32 @@ interface GraphPhysicsFieldConfig {
   prefSuffix: string;
 }
 
+export const GRAPH_INTERACTION_CONSTANTS = {
+  wheelDeltaModeLine: 1,
+  wheelDeltaModePage: 2,
+  wheelDeltaLinePixels: 16,
+  wheelDeltaMaxPixels: 240,
+} as const;
+
+export function normalizeGraphWheelDelta(
+  deltaY: number,
+  deltaMode: number,
+  viewportHeight: number,
+) {
+  let deltaPixels = deltaY;
+
+  if (deltaMode === GRAPH_INTERACTION_CONSTANTS.wheelDeltaModeLine) {
+    deltaPixels *= GRAPH_INTERACTION_CONSTANTS.wheelDeltaLinePixels;
+  } else if (deltaMode === GRAPH_INTERACTION_CONSTANTS.wheelDeltaModePage) {
+    deltaPixels *= Math.max(1, viewportHeight);
+  }
+
+  return Math.max(
+    -GRAPH_INTERACTION_CONSTANTS.wheelDeltaMaxPixels,
+    Math.min(GRAPH_INTERACTION_CONSTANTS.wheelDeltaMaxPixels, deltaPixels),
+  );
+}
+
 export const GRAPH_PHYSICS_FIELD_CONFIG: Record<GraphPhysicsFieldKey, GraphPhysicsFieldConfig> = {
   charge: {
     label: "Repulsion (charge)",
@@ -784,12 +810,12 @@ export const GRAPH_PHYSICS_FIELD_CONFIG: Record<GraphPhysicsFieldKey, GraphPhysi
   zoomWheelSensitivity: {
     label: "Wheel zoom sensitivity",
     description:
-      "Exponential wheel-to-zoom conversion factor. Increase for faster zoom per wheel tick; decrease for finer zoom control.",
+      "Exponential wheel-to-zoom conversion factor after normalizing mouse-wheel and trackpad input. Increase for faster zoom; decrease for finer control.",
     min: 0.0001,
     max: 0.02,
     step: 0.0001,
     decimals: 4,
-    default: 0.0014,
+    default: 0.004,
     prefSuffix: "graphZoomWheelSensitivity",
   },
   warmupTicksBeforeFit: {
@@ -963,6 +989,7 @@ export function renderCollectionCitationGraphWindow(
     /</g,
     "\\u003c",
   );
+  const graphInteractionConstantsPayload = JSON.stringify(GRAPH_INTERACTION_CONSTANTS);
   const showTuningControlsPayload = JSON.stringify(Boolean(options.showTuningControls));
   const html = `<!doctype html>
 <html>
@@ -1336,6 +1363,7 @@ export function renderCollectionCitationGraphWindow(
     const data = ${payload};
     const physicsSettings = ${physicsPayload};
     const physicsFieldConfig = ${physicsFieldConfigPayload};
+    const graphInteractionConstants = ${graphInteractionConstantsPayload};
     const physicsFieldKeys = Object.keys(physicsFieldConfig);
     const showTuningControls = ${showTuningControlsPayload};
     const NS = "http://www.w3.org/2000/svg";
@@ -1363,6 +1391,22 @@ export function renderCollectionCitationGraphWindow(
 
     function clamp(value, min, max) {
       return Math.max(min, Math.min(max, value));
+    }
+
+    function normalizeWheelDelta(event) {
+      let deltaPixels = event.deltaY;
+
+      if (event.deltaMode === graphInteractionConstants.wheelDeltaModeLine) {
+        deltaPixels *= graphInteractionConstants.wheelDeltaLinePixels;
+      } else if (event.deltaMode === graphInteractionConstants.wheelDeltaModePage) {
+        deltaPixels *= Math.max(1, svg.clientHeight);
+      }
+
+      return clamp(
+        deltaPixels,
+        -graphInteractionConstants.wheelDeltaMaxPixels,
+        graphInteractionConstants.wheelDeltaMaxPixels,
+      );
     }
 
     function applyStyleSettings() {
@@ -2532,7 +2576,8 @@ export function renderCollectionCitationGraphWindow(
         event.preventDefault();
         const local = clientPointToLocal(event.clientX, event.clientY);
         const world = localPointToWorld(local.x, local.y);
-        const zoomFactor = Math.exp(-event.deltaY * settings.zoomWheelSensitivity);
+        const wheelDelta = normalizeWheelDelta(event);
+        const zoomFactor = Math.exp(-wheelDelta * settings.zoomWheelSensitivity);
         const newScale = clamp(transform.k * zoomFactor, settings.zoomMin, settings.zoomMax);
 
         if (newScale === transform.k) {
