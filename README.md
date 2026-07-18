@@ -61,6 +61,10 @@ all graph settings and a `Regenerate` button. Wheel and trackpad zoom are normal
 responsive scrolling. Adjust `Wheel zoom sensitivity` in this panel to make zoom faster or slower;
 the value is saved for future graph windows.
 
+Graph layout treats every visible paper title and its node as one collision area. Titles that appear
+after zooming or hovering briefly reheat the layout so they do not cover other visible titles or
+nodes; hidden titles do not consume graph space. Citation edges can still pass behind title text.
+
 These and other settings are also customizable via: Edit > Settings > Advanced > Config Editor > `extensions.zotero-openalex.*`
 
 ### Usage: Optional API key

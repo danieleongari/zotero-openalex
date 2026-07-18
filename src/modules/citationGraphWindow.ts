@@ -120,7 +120,119 @@ interface GraphPhysicsFieldConfig {
   prefSuffix: string;
 }
 
+export interface GraphBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+export interface GraphLabelBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface GraphCollisionDisplacement {
+  x: number;
+  y: number;
+}
+
+export interface GraphCollisionVelocity {
+  aX: number;
+  aY: number;
+  bX: number;
+  bY: number;
+}
+
+export function buildGraphNodeFootprint(
+  x: number,
+  y: number,
+  radius: number,
+  labelBounds: GraphLabelBounds | null,
+  labelVisible: boolean,
+  labelOffsetX: number,
+  labelOffsetY: number,
+  labelHaloWidth: number,
+): GraphBounds {
+  const footprint = {
+    minX: x - radius,
+    maxX: x + radius,
+    minY: y - radius,
+    maxY: y + radius,
+  };
+
+  if (!labelVisible || !labelBounds) {
+    return footprint;
+  }
+
+  const halo = Math.max(0, labelHaloWidth);
+  const labelX = x + radius + labelOffsetX;
+  const labelY = y + labelOffsetY;
+  footprint.minX = Math.min(footprint.minX, labelX + labelBounds.x - halo);
+  footprint.maxX = Math.max(footprint.maxX, labelX + labelBounds.x + labelBounds.width + halo);
+  footprint.minY = Math.min(footprint.minY, labelY + labelBounds.y - halo);
+  footprint.maxY = Math.max(footprint.maxY, labelY + labelBounds.y + labelBounds.height + halo);
+
+  return footprint;
+}
+
+export function getGraphCollisionDisplacement(
+  a: GraphBounds,
+  b: GraphBounds,
+  padding: number,
+  tieBreakDirection = 1,
+): GraphCollisionDisplacement | null {
+  const halfPadding = Math.max(0, padding) / 2;
+  const overlapX =
+    Math.min(a.maxX + halfPadding, b.maxX + halfPadding) -
+    Math.max(a.minX - halfPadding, b.minX - halfPadding);
+  const overlapY =
+    Math.min(a.maxY + halfPadding, b.maxY + halfPadding) -
+    Math.max(a.minY - halfPadding, b.minY - halfPadding);
+
+  if (overlapX <= 0 || overlapY <= 0) {
+    return null;
+  }
+
+  const aCenterX = (a.minX + a.maxX) / 2;
+  const bCenterX = (b.minX + b.maxX) / 2;
+  const aCenterY = (a.minY + a.maxY) / 2;
+  const bCenterY = (b.minY + b.maxY) / 2;
+  const fallbackSign = tieBreakDirection < 0 ? -1 : 1;
+
+  if (overlapX <= overlapY) {
+    const direction = bCenterX === aCenterX ? fallbackSign : bCenterX > aCenterX ? 1 : -1;
+    return { x: direction * overlapX, y: 0 };
+  }
+
+  const direction = bCenterY === aCenterY ? fallbackSign : bCenterY > aCenterY ? 1 : -1;
+  return { x: 0, y: direction * overlapY };
+}
+
+export function getGraphCollisionVelocity(
+  displacement: GraphCollisionDisplacement,
+  strength: number,
+  alpha: number,
+  aAnchored: boolean,
+  bAnchored: boolean,
+): GraphCollisionVelocity {
+  const factor = strength * alpha;
+  return {
+    aX: aAnchored ? 0 : -displacement.x * factor,
+    aY: aAnchored ? 0 : -displacement.y * factor,
+    bX: bAnchored ? 0 : displacement.x * factor,
+    bY: bAnchored ? 0 : displacement.y * factor,
+  };
+}
+
+export function graphLabelVisibilityChanged(current: boolean, next: boolean) {
+  return current !== next;
+}
+
 export const GRAPH_INTERACTION_CONSTANTS = {
+  labelVisibilityAlpha: 1,
   wheelDeltaModeLine: 1,
   wheelDeltaModePage: 2,
   wheelDeltaLinePixels: 16,
@@ -238,7 +350,7 @@ export const GRAPH_PHYSICS_FIELD_CONFIG: Record<GraphPhysicsFieldKey, GraphPhysi
   collisionPadding: {
     label: "Collision padding",
     description:
-      "Extra spacing added between node circles during collision resolution. Increase to add breathing room; decrease to pack nodes more tightly.",
+      "Extra spacing around node circles and visible titles during collision resolution. Increase to add breathing room; decrease to pack the graph more tightly.",
     min: 0,
     max: 30,
     step: 0.5,
@@ -990,6 +1102,10 @@ export function renderCollectionCitationGraphWindow(
     "\\u003c",
   );
   const graphInteractionConstantsPayload = JSON.stringify(GRAPH_INTERACTION_CONSTANTS);
+  const buildGraphNodeFootprintPayload = buildGraphNodeFootprint.toString();
+  const getGraphCollisionDisplacementPayload = getGraphCollisionDisplacement.toString();
+  const getGraphCollisionVelocityPayload = getGraphCollisionVelocity.toString();
+  const graphLabelVisibilityChangedPayload = graphLabelVisibilityChanged.toString();
   const showTuningControlsPayload = JSON.stringify(Boolean(options.showTuningControls));
   const html = `<!doctype html>
 <html>
@@ -1364,6 +1480,10 @@ export function renderCollectionCitationGraphWindow(
     const physicsSettings = ${physicsPayload};
     const physicsFieldConfig = ${physicsFieldConfigPayload};
     const graphInteractionConstants = ${graphInteractionConstantsPayload};
+    const buildGraphNodeFootprint = ${buildGraphNodeFootprintPayload};
+    const getGraphCollisionDisplacement = ${getGraphCollisionDisplacementPayload};
+    const getGraphCollisionVelocity = ${getGraphCollisionVelocityPayload};
+    const graphLabelVisibilityChanged = ${graphLabelVisibilityChangedPayload};
     const physicsFieldKeys = Object.keys(physicsFieldConfig);
     const showTuningControls = ${showTuningControlsPayload};
     const NS = "http://www.w3.org/2000/svg";
@@ -1494,10 +1614,14 @@ export function renderCollectionCitationGraphWindow(
       applyPhysicsToSettings(nextPhysics);
       persistPhysicsToPrefs(nextPhysics);
 
+      for (let i = 0; i < simNodes.length; i++) {
+        refreshNodeLabelGeometry(simNodes[i]);
+      }
+
       hoveredNodeID = null;
       setTooltipNode(null, 0, 0);
       reseedNodesForRegeneration();
-      updateVisualFocus();
+      updateVisualFocus(false);
       renderFrame();
 
       alpha = 1;
@@ -1658,6 +1782,9 @@ export function renderCollectionCitationGraphWindow(
         fixed: false,
         circleEl: null,
         labelEl: null,
+        labelBounds: null,
+        labelLines: [],
+        labelVisible: false,
       };
       nodeByID.set(simNode.id, simNode);
       adjacency.set(simNode.id, new Set());
@@ -1922,15 +2049,15 @@ export function renderCollectionCitationGraphWindow(
       return lines;
     }
 
-    function createNodeLabel(node) {
-      const textEl = document.createElementNS(NS, "text");
-      textEl.setAttribute("class", "node-label");
-
+    function populateNodeLabel(node, textEl) {
+      clearChildren(textEl);
       const lines = splitLabelLines(
         formatNodeDisplayLabel(node),
         Math.max(1, Math.round(settings.labelMaxCharsPerLine)),
         Math.max(1, Math.round(settings.labelMaxLines)),
       );
+      node.labelLines = lines;
+
       for (let i = 0; i < lines.length; i++) {
         const tspan = document.createElementNS(NS, "tspan");
         tspan.setAttribute("x", "0");
@@ -1938,8 +2065,97 @@ export function renderCollectionCitationGraphWindow(
         tspan.textContent = lines[i];
         textEl.appendChild(tspan);
       }
+    }
+
+    function createNodeLabel(node) {
+      const textEl = document.createElementNS(NS, "text");
+      textEl.setAttribute("class", "node-label");
+      populateNodeLabel(node, textEl);
 
       return textEl;
+    }
+
+    function estimateNodeLabelBounds(node) {
+      const lines = Array.isArray(node.labelLines) ? node.labelLines : [];
+      let longestLineLength = 0;
+      for (let i = 0; i < lines.length; i++) {
+        longestLineLength = Math.max(longestLineLength, String(lines[i]).length);
+      }
+
+      const lineCount = Math.max(1, lines.length);
+      const width = Math.max(1, longestLineLength * settings.labelFontSize * 0.6);
+      const height =
+        settings.labelFontSize + Math.max(0, lineCount - 1) * settings.labelLineHeight;
+      return {
+        x: 0,
+        y: -settings.labelFontSize * 0.8,
+        width,
+        height,
+      };
+    }
+
+    function measureNodeLabel(node) {
+      if (!node.labelEl) {
+        node.labelBounds = estimateNodeLabelBounds(node);
+        return;
+      }
+
+      const previousDisplay = node.labelEl.style.display;
+      const previousTransform = node.labelEl.getAttribute("transform");
+      node.labelEl.style.display = "";
+      node.labelEl.removeAttribute("transform");
+
+      try {
+        const bounds = node.labelEl.getBBox();
+        if (
+          Number.isFinite(bounds.x) &&
+          Number.isFinite(bounds.y) &&
+          Number.isFinite(bounds.width) &&
+          Number.isFinite(bounds.height) &&
+          bounds.width > 0 &&
+          bounds.height > 0
+        ) {
+          node.labelBounds = {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+          };
+        } else {
+          node.labelBounds = estimateNodeLabelBounds(node);
+        }
+      } catch (_error) {
+        node.labelBounds = estimateNodeLabelBounds(node);
+      }
+
+      if (previousTransform === null) {
+        node.labelEl.removeAttribute("transform");
+      } else {
+        node.labelEl.setAttribute("transform", previousTransform);
+      }
+      node.labelEl.style.display = previousDisplay;
+    }
+
+    function refreshNodeLabelGeometry(node) {
+      if (!node.labelEl) {
+        return;
+      }
+      populateNodeLabel(node, node.labelEl);
+      measureNodeLabel(node);
+      updateNodeScreenPosition(node);
+    }
+
+    function nodeFootprint(node) {
+      return buildGraphNodeFootprint(
+        node.x,
+        node.y,
+        node.radius,
+        node.labelBounds,
+        node.labelVisible,
+        settings.labelOffsetX,
+        settings.labelOffsetY,
+        settings.labelStrokeWidth / 2,
+      );
     }
 
     function updateNodeScreenPosition(node) {
@@ -2019,6 +2235,7 @@ export function renderCollectionCitationGraphWindow(
 
       nodesLayer.appendChild(circleEl);
       labelsLayer.appendChild(labelEl);
+      measureNodeLabel(node);
     }
 
     const transform = { x: 0, y: 0, k: 1 };
@@ -2060,11 +2277,11 @@ export function renderCollectionCitationGraphWindow(
       let maxY = -Infinity;
 
       for (let i = 0; i < simNodes.length; i++) {
-        const node = simNodes[i];
-        minX = Math.min(minX, node.x - node.radius);
-        maxX = Math.max(maxX, node.x + node.radius);
-        minY = Math.min(minY, node.y - node.radius);
-        maxY = Math.max(maxY, node.y + node.radius);
+        const footprint = nodeFootprint(simNodes[i]);
+        minX = Math.min(minX, footprint.minX);
+        maxX = Math.max(maxX, footprint.maxX);
+        minY = Math.min(minY, footprint.minY);
+        maxY = Math.max(maxY, footprint.maxY);
       }
 
       const size = viewportSize();
@@ -2107,6 +2324,10 @@ export function renderCollectionCitationGraphWindow(
       return hoveredNodeID;
     }
 
+    function isNodeAnchored(node) {
+      return node.fixed || hoveredNodeID === node.id;
+    }
+
     function directionalNeighborSets(focusID) {
       const parentSet = new Set();
       const childSet = new Set();
@@ -2144,13 +2365,14 @@ export function renderCollectionCitationGraphWindow(
       return set;
     }
 
-    function updateLabelVisibility() {
+    function updateLabelVisibility(reheatOnChange) {
       const labelsForFocus = activeLabelSet();
       const mode = labelMode;
       const alwaysShow =
         mode === "always" ||
         (mode === "auto" &&
           simNodes.length <= Math.round(settings.alwaysShowLabelNodeThreshold));
+      let changed = false;
 
       for (let i = 0; i < simNodes.length; i++) {
         const node = simNodes[i];
@@ -2169,11 +2391,21 @@ export function renderCollectionCitationGraphWindow(
             (topLabelNodeIDs.has(node.id) && transform.k > settings.labelVisibilityZoomThreshold);
         }
 
+        if (graphLabelVisibilityChanged(node.labelVisible, visible)) {
+          node.labelVisible = visible;
+          changed = true;
+        }
         node.labelEl.style.display = visible ? "" : "none";
       }
+
+      if (changed && reheatOnChange) {
+        restartSimulation(graphInteractionConstants.labelVisibilityAlpha);
+      }
+
+      return changed;
     }
 
-    function updateVisualFocus() {
+    function updateVisualFocus(reheatLabels = true) {
       const focusID = activeFocusNodeID();
       const { parentSet, childSet } = directionalNeighborSets(focusID);
 
@@ -2205,7 +2437,7 @@ export function renderCollectionCitationGraphWindow(
         edge.lineEl.classList.toggle("dimmed", false);
       }
 
-      updateLabelVisibility();
+      updateLabelVisibility(reheatLabels);
     }
 
     function renderFrame() {
@@ -2245,11 +2477,11 @@ export function renderCollectionCitationGraphWindow(
           const fx = (dx / dist) * force;
           const fy = (dy / dist) * force;
 
-          if (!a.fixed) {
+          if (!isNodeAnchored(a)) {
             a.vx -= fx;
             a.vy -= fy;
           }
-          if (!b.fixed) {
+          if (!isNodeAnchored(b)) {
             b.vx += fx;
             b.vy += fy;
           }
@@ -2264,7 +2496,7 @@ export function renderCollectionCitationGraphWindow(
 
       for (let i = 0; i < isolatedNodes.length; i++) {
         const node = isolatedNodes[i];
-        if (node.fixed) {
+        if (isNodeAnchored(node)) {
           continue;
         }
 
@@ -2306,11 +2538,11 @@ export function renderCollectionCitationGraphWindow(
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
 
-        if (!a.fixed) {
+        if (!isNodeAnchored(a)) {
           a.vx += fx;
           a.vy += fy;
         }
-        if (!b.fixed) {
+        if (!isNodeAnchored(b)) {
           b.vx -= fx;
           b.vy -= fy;
         }
@@ -2320,7 +2552,7 @@ export function renderCollectionCitationGraphWindow(
     function applyCentering(alpha) {
       for (let i = 0; i < simNodes.length; i++) {
         const node = simNodes[i];
-        if (node.fixed) {
+        if (isNodeAnchored(node)) {
           continue;
         }
         const centerFactor = node.degree === 0 ? settings.isolatedCenterFactor : 1;
@@ -2330,36 +2562,36 @@ export function renderCollectionCitationGraphWindow(
     }
 
     function applyCollision(alpha) {
+      const footprints = [];
+      for (let i = 0; i < simNodes.length; i++) {
+        footprints.push(nodeFootprint(simNodes[i]));
+      }
+
       for (let i = 0; i < simNodes.length; i++) {
         for (let j = i + 1; j < simNodes.length; j++) {
           const a = simNodes[i];
           const b = simNodes[j];
-          let dx = b.x - a.x;
-          let dy = b.y - a.y;
-          let dist = Math.sqrt(dx * dx + dy * dy);
-          if (!dist) {
-            dist = 1;
-            dx = 1;
-            dy = 0;
-          }
-
-          const minDist = a.radius + b.radius + settings.collisionPadding;
-          if (dist >= minDist) {
+          const displacement = getGraphCollisionDisplacement(
+            footprints[i],
+            footprints[j],
+            settings.collisionPadding,
+            (i + j) % 2 === 0 ? 1 : -1,
+          );
+          if (!displacement) {
             continue;
           }
 
-          const push = (minDist - dist) * settings.collisionStrength * alpha;
-          const fx = (dx / dist) * push;
-          const fy = (dy / dist) * push;
-
-          if (!a.fixed) {
-            a.vx -= fx;
-            a.vy -= fy;
-          }
-          if (!b.fixed) {
-            b.vx += fx;
-            b.vy += fy;
-          }
+          const velocity = getGraphCollisionVelocity(
+            displacement,
+            settings.collisionStrength,
+            alpha,
+            isNodeAnchored(a),
+            isNodeAnchored(b),
+          );
+          a.vx += velocity.aX;
+          a.vy += velocity.aY;
+          b.vx += velocity.bX;
+          b.vy += velocity.bY;
         }
       }
     }
@@ -2407,7 +2639,7 @@ export function renderCollectionCitationGraphWindow(
       let totalSpeed = 0;
       for (let i = 0; i < simNodes.length; i++) {
         const node = simNodes[i];
-        if (node.fixed) {
+        if (isNodeAnchored(node)) {
           node.vx = 0;
           node.vy = 0;
           continue;
@@ -2588,7 +2820,7 @@ export function renderCollectionCitationGraphWindow(
         transform.x = local.x - world.x * newScale;
         transform.y = local.y - world.y * newScale;
         applyTransform();
-        updateLabelVisibility();
+        updateLabelVisibility(true);
       },
       { passive: false },
     );
@@ -2656,7 +2888,7 @@ export function renderCollectionCitationGraphWindow(
       fitGraph(settings.fitPadding);
     });
 
-    updateVisualFocus();
+    updateVisualFocus(false);
     renderFrame();
     resetView();
 
