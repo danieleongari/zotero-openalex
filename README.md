@@ -54,9 +54,12 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `autoUpdateOnStartup` (default `true`): check items for updates at startup.
 - `staleMonths` (default `3`): months after which the number of citations is updated.
 - `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
-- `showGraphTuningControls` (default `false`): show tunable graph coefficients directly in the Citation Graph window.
+- `showGraphTuningControls` (default `false`): show tunable graph settings directly in the Citation Graph window.
 
-When `showGraphTuningControls` is enabled, the Citation Graph window shows a tuning panel with all physics coefficients and a `Regenerate` button.
+When `showGraphTuningControls` is enabled, the Citation Graph window shows a tuning panel with
+all graph settings and a `Regenerate` button. Wheel and trackpad zoom are normalized for consistent,
+responsive scrolling. Adjust `Wheel zoom sensitivity` in this panel to make zoom faster or slower;
+the value is saved for future graph windows.
 
 These and other settings are also customizable via: Edit > Settings > Advanced > Config Editor > `extensions.zotero-openalex.*`
 
