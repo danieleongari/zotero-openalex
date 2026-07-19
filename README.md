@@ -2,7 +2,9 @@
 
 Zotero OpenAlex is a Zotero plugin that fetches OpenAlex metadata for your items and keeps citation data up to date.
 
-It stores machine-readable fields in each item's `Extra` field:
+<img src="docs/assets/snapshot_low-res.jpg" alt="Snapshot of the app" height="600">
+
+The plugin stores machine-readable fields in each item's `Extra` field:
 
 - `openalex.work_id: W...`
 - `openalex.cit_count: N`
@@ -13,6 +15,9 @@ Only `openalex.*` lines are parsed and managed by the plugin.
 The complete OpenAlex Work response is also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
+
+> READ CAREFULLY: The plugin will OVERWRITE the existing URL metadata of your items with the OpenAlex Work URL. 
+> The rational is to use the DOI link as one-click link to the original source and URL as link to the OpenAlex Work page.
 
 ## What the plugin does
 
