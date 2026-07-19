@@ -163,7 +163,8 @@ when the corresponding major-version change is intentional.
 
 After a release-worthy PR is merged, Release Please opens or updates one rolling release PR. That
 PR contains the computed version and generated changelog. Review it like any other PR. Merging it
-creates the `vX.Y.Z` tag and GitHub Release, then CI builds and uploads:
+creates the `vX.Y.Z` tag and GitHub Release, then directly calls the artifact publishing workflow
+to build and upload:
 
 - `zotero-openalex.xpi`
 - `update.json`
@@ -175,17 +176,13 @@ to the repository.
 
 #### Release automation setup
 
-The Release Please workflow uses a fine-grained personal access token stored as the repository
-secret `RELEASE_PLEASE_TOKEN`. The token must be limited to this repository and have these
-repository permissions:
+Release Please uses the built-in, short-lived `GITHUB_TOKEN`; no custom release token or repository
+secret is required. Under **Settings → Actions → General**, set workflow permissions to **Read and
+write permissions** and enable **Allow GitHub Actions to create and approve pull requests**.
 
-- Contents: read and write
-- Issues: read and write
-- Pull requests: read and write
-
-Set an expiry date and rotate the token before it expires. The separate token is required because
-pull requests created with GitHub's default workflow token do not trigger the required PR checks.
-Never place the token in a file, workflow, issue, pull request, or log.
+Release PRs created with `GITHUB_TOKEN` do not trigger separate pull-request workflows. CI still
+runs on the merge to `main`, and the publishing workflow independently validates the release tag,
+XPI, `update.json`, download URL, and checksum before uploading the assets.
 
 If artifact publication fails after the tag and GitHub Release are created, fix the reported
 problem and run the `Publish release artifacts` workflow manually with the existing `vX.Y.Z` tag.
