@@ -16,7 +16,7 @@ The complete OpenAlex Work response is also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
 
-> READ CAREFULLY: The plugin will OVERWRITE the existing URL metadata of your items with the OpenAlex Work URL. 
+> READ CAREFULLY: The plugin will OVERWRITE the existing URL metadata of your items with the OpenAlex Work URL.
 > The rational is to use the DOI link as one-click link to the original source and URL as link to the OpenAlex Work page.
 
 ## What the plugin does
