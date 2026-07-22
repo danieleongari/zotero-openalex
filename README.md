@@ -26,7 +26,7 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 - Stores the complete OpenAlex Work JSON in a local SQLite database.
 - Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
 - Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Citation Graph..." showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
 
 ## Installation
 
@@ -209,9 +209,10 @@ assets above; its XPI manifest version and `update.json` version must match the 
 
 ## Acknowledgements
 
-- OpenAlex Work-ID retrieval inspired by [mtillman14/open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
-- Citation Graph inspired by [Exyeus/zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
-- Citation column inspired by [daeh/zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+- OpenAlex Work-ID retrieval inspired by @mtillman14 [open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
+- Citation Graph inspired by @Exyeus [zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
+- Citation column inspired by @daeh [zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+- "Citations vs Year" graph inspired by @AlessMor [zotero-citation-graph](https://github.com/AlessMor/zotero-citation-map)
 
 Thread opened on Zotero's forum at
 [https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection](https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection),
