@@ -209,9 +209,10 @@ assets above; its XPI manifest version and `update.json` version must match the 
 
 ## Acknowledgements
 
-- OpenAlex Work-ID retrieval inspired by [mtillman14/open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
-- Citation Graph inspired by [Exyeus/zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
-- Citation column inspired by [daeh/zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+- OpenAlex Work-ID retrieval inspired by @mtillman14 [open-alex-work-id](https://github.com/mtillman14/open-alex-work-id)
+- Citation Graph inspired by @Exyeus [zotero-citation-visualizer](https://github.com/Exyeus/zotero-citation-visualier)
+- Citation column inspired by @daeh [zotero-citation-tally](https://github.com/daeh/zotero-citation-tally)
+- "Citations vs Year" graph inspired by @AlessMor [zotero-citation-graph](https://github.com/AlessMor/zotero-citation-map)
 
 Thread opened on Zotero's forum at
 [https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection](https://forums.zotero.org/discussion/132439/making-a-strong-zotero-openalex-connection),
