@@ -42,6 +42,19 @@ interface UpdateOutcome {
 interface OpenAlexWork extends OpenAlexWorkPayload {
   display_name?: string;
   publication_year?: number | string;
+  authorships?: OpenAlexAuthorship[];
+}
+
+interface OpenAlexAuthorship {
+  author?: {
+    id?: string;
+    display_name?: string;
+  };
+}
+
+interface CollectionGraphAuthor {
+  id: string;
+  name: string;
 }
 
 interface CollectionGraphNode {
@@ -57,6 +70,7 @@ interface CollectionGraphNode {
   lastAuthor: string | null;
   publicationDate: string | null;
   collectionPaths: string[];
+  authors: CollectionGraphAuthor[];
 }
 
 interface CollectionGraphEdge {
@@ -151,7 +165,7 @@ class OpenAlexWorkIDClass {
     itemMenuPopup.addEventListener("popupshowing", onItemPopupShowing);
 
     const collectionGraphMenuItem = doc.createXULElement("menuitem");
-    collectionGraphMenuItem.setAttribute("label", "Generate OpenAlex Citation Graph...");
+    collectionGraphMenuItem.setAttribute("label", "Generate OpenAlex Graphs");
     collectionGraphMenuItem.setAttribute("id", COLLECTION_GRAPH_MENU_ID);
 
     const onCollectionCommand = async () => {
@@ -830,6 +844,7 @@ async function buildCitationGraphDataFromScope(
       lastAuthor: authorDateInfo.lastAuthor,
       publicationDate: authorDateInfo.itemDate,
       collectionPaths,
+      authors: [],
     });
   }
 
@@ -912,6 +927,7 @@ async function buildCitationGraphDataFromScope(
     if (openAlexCitationCount !== null) {
       source.citationCount = openAlexCitationCount;
     }
+    source.authors = normalizeOpenAlexAuthors(work.authorships);
 
     const references = Array.isArray(work.referenced_works) ? work.referenced_works : [];
     source.referencesCount = references.length;
@@ -1122,6 +1138,33 @@ function getCreatorTypeName(creator: any) {
   }
 
   return "";
+}
+
+function normalizeOpenAlexAuthors(authorships: OpenAlexAuthorship[] | undefined) {
+  if (!Array.isArray(authorships)) return [] as CollectionGraphAuthor[];
+
+  const authorByID = new Map<string, CollectionGraphAuthor>();
+  for (const authorship of authorships) {
+    const rawID = String(authorship?.author?.id || "").trim();
+    const idMatch = rawID.match(/(?:^|\/)A(\d+)\/?$/i);
+    if (!idMatch) continue;
+
+    const id = `A${idMatch[1]}`;
+    const displayName = String(authorship?.author?.display_name || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const name = displayName || id;
+    const existing = authorByID.get(id);
+    if (
+      !existing ||
+      existing.name === id ||
+      (name !== id && name.localeCompare(existing.name) < 0)
+    ) {
+      authorByID.set(id, { id, name });
+    }
+  }
+
+  return [...authorByID.values()].sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function normalizeYear(value: string | undefined) {
@@ -1928,4 +1971,5 @@ export const __test__ = {
   normalizeArXivID,
   buildArXivDOI,
   resolveDOIForLookup,
+  normalizeOpenAlexAuthors,
 };

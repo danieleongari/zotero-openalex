@@ -26,7 +26,7 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 - Stores the complete OpenAlex Work JSON in a local SQLite database.
 - Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
 - Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Citation Graph..." showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
 
 ## Installation
 

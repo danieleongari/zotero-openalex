@@ -87,4 +87,20 @@ describe("OpenAlex SQLite store", function () {
     assert.isTrue(openAlexTest.shouldUpdateOnStartup(item, 3, new Set()));
     assert.isFalse(openAlexTest.shouldUpdateOnStartup(item, 3, new Set(["W123"])));
   });
+
+  it("normalizes IDs and names while removing malformed and duplicate authorships", function () {
+    assert.deepEqual(
+      openAlexTest.normalizeOpenAlexAuthors([
+        { author: { id: "https://openalex.org/a123", display_name: "  Alice   Author  " } },
+        { author: { id: "A123", display_name: "Alice Alternate" } },
+        { author: { id: "https://openalex.org/A456", display_name: "" } },
+        { author: { id: "https://openalex.org/W999", display_name: "Not an author" } },
+        { author: { display_name: "Missing ID" } },
+      ]),
+      [
+        { id: "A123", name: "Alice Alternate" },
+        { id: "A456", name: "A456" },
+      ],
+    );
+  });
 });
