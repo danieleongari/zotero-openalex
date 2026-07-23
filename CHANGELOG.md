@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.5.0](https://github.com/danieleongari/zotero-openalex/compare/v9.4.0...v9.5.0) (2026-07-22)
+
+
+### Features
+
+* add selectable OpenAlex graph views ([#23](https://github.com/danieleongari/zotero-openalex/issues/23)) ([dddad1a](https://github.com/danieleongari/zotero-openalex/commit/dddad1ab5d769687ab714fbf662d7d7016ffd4bd))
+
 ## [9.4.0](https://github.com/danieleongari/zotero-openalex/compare/v9.3.0...v9.4.0) (2026-07-18)
 
 
