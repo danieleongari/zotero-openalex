@@ -4,7 +4,14 @@ import {
   renderCollectionCitationGraphWindow,
   type GraphPhysicsSettings,
 } from "./citationGraphWindow";
-import { OpenAlexStore, type OpenAlexWorkPayload } from "./openalexStore";
+import {
+  OpenAlexStore,
+  type OpenAlexAuthorPayload,
+  type OpenAlexCacheCleanupResult,
+  type OpenAlexCacheStats,
+  type OpenAlexWorkPayload,
+  type StoredOpenAlexAuthor,
+} from "./openalexStore";
 
 const OPENALEX_BASE_URL = "https://api.openalex.org";
 const WORK_ID_PREFIX = "openalex.work_id:";
@@ -17,6 +24,8 @@ const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
 const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
+const MINIMUM_AUTHOR_H_INDEX_PREF = "minimumAuthorHIndex";
+const OPENALEX_AUTHOR_BATCH_SIZE = 100;
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i;
 const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
@@ -52,9 +61,19 @@ interface OpenAlexAuthorship {
   };
 }
 
+type OpenAlexAuthor = OpenAlexAuthorPayload;
+
+interface CollectionGraphAuthorAffiliation {
+  institutionID: string | null;
+  institutionName: string;
+  years: number[];
+}
+
 interface CollectionGraphAuthor {
   id: string;
   name: string;
+  hIndex: number | null;
+  affiliations: CollectionGraphAuthorAffiliation[];
 }
 
 interface CollectionGraphNode {
@@ -504,6 +523,7 @@ class OpenAlexWorkIDClass {
         renderCollectionCitationGraphWindow(graphWindow, graphData, {
           physics: getGraphPhysicsSettings(),
           showTuningControls: getBooleanPref(GRAPH_SHOW_TUNING_CONTROLS_PREF, false),
+          minimumAuthorHIndex: getNumberPref(MINIMUM_AUTHOR_H_INDEX_PREF, 5, 0, 1000),
         });
       } else {
         openCollectionCitationGraphWindow(graphData);
@@ -519,6 +539,18 @@ class OpenAlexWorkIDClass {
       }
       window.alert(`Failed to build citation graph: ${String(error)}`);
     }
+  }
+
+  async getMetadataCacheStats(): Promise<OpenAlexCacheStats> {
+    return openAlexStore.getCacheStats();
+  }
+
+  async cleanMetadataCache(): Promise<OpenAlexCacheCleanupResult> {
+    const allRegularItems = await getAllRegularItems();
+    const validWorkIDs = allRegularItems
+      .map((item) => parseOpenAlexMetadata((item.getField("extra") as string) || "").workID)
+      .filter((workID): workID is string => Boolean(workID));
+    return openAlexStore.clean(validWorkIDs);
   }
 
   async main() {
@@ -606,6 +638,7 @@ class OpenAlexWorkIDClass {
       );
 
       if (candidates.length === 0) {
+        await backfillMissingAuthors(knownWorkIDs);
         if (shouldShowSummary) {
           showStatusMessage("OpenAlex", "Startup sync ran: no items needed updates.");
           closeStatusWindow(2200);
@@ -644,6 +677,8 @@ class OpenAlexWorkIDClass {
           await delay(requestDelayMs);
         }
       }
+
+      await backfillMissingAuthors(knownWorkIDs);
 
       Zotero.debug(
         `OpenAlex startup sync complete: ${updatedCount} updated, ${unchangedCount} unchanged, ${skippedCount} skipped.`,
@@ -739,6 +774,13 @@ async function synchronizeItemsWithWork(
       }
     }
     throw error;
+  }
+
+  try {
+    await hydrateAuthorsForWorks([workID], { refresh: true });
+  } catch (error) {
+    Zotero.debug(`OpenAlex: failed refreshing authors for ${workID}`);
+    Zotero.debug(error);
   }
 }
 
@@ -912,6 +954,16 @@ async function buildCitationGraphDataFromScope(
     }
   }
 
+  updateProgress("Loading cached OpenAlex author metadata...", 57);
+  try {
+    await hydrateAuthorsForWorks(uniqueWorkIDs);
+  } catch (error) {
+    Zotero.debug("OpenAlex graph: failed backfilling author metadata");
+    Zotero.debug(error);
+  }
+  const graphAuthorIDs = await openAlexStore.getAuthorIDsForWorks(uniqueWorkIDs);
+  const authorCache = await openAlexStore.getAuthors(graphAuthorIDs);
+
   const edgeKeySet = new Set<string>();
   const fetchFailures = eligibleNodes.filter((node) => !workCache.has(node.workID)).length;
 
@@ -927,7 +979,7 @@ async function buildCitationGraphDataFromScope(
     if (openAlexCitationCount !== null) {
       source.citationCount = openAlexCitationCount;
     }
-    source.authors = normalizeOpenAlexAuthors(work.authorships);
+    source.authors = normalizeOpenAlexAuthors(work.authorships, authorCache);
 
     const references = Array.isArray(work.referenced_works) ? work.referenced_works : [];
     source.referencesCount = references.length;
@@ -1140,31 +1192,88 @@ function getCreatorTypeName(creator: any) {
   return "";
 }
 
-function normalizeOpenAlexAuthors(authorships: OpenAlexAuthorship[] | undefined) {
+function normalizeOpenAlexAuthors(
+  authorships: OpenAlexAuthorship[] | undefined,
+  authorCache: ReadonlyMap<string, StoredOpenAlexAuthor> = new Map(),
+) {
   if (!Array.isArray(authorships)) return [] as CollectionGraphAuthor[];
 
   const authorByID = new Map<string, CollectionGraphAuthor>();
   for (const authorship of authorships) {
-    const rawID = String(authorship?.author?.id || "").trim();
-    const idMatch = rawID.match(/(?:^|\/)A(\d+)\/?$/i);
-    if (!idMatch) continue;
+    const id = normalizeOpenAlexAuthorID(authorship?.author?.id);
+    if (!id) continue;
 
-    const id = `A${idMatch[1]}`;
-    const displayName = String(authorship?.author?.display_name || "")
+    const storedAuthor = authorCache.get(id);
+    const displayName = String(
+      storedAuthor?.metadata.display_name || authorship?.author?.display_name || "",
+    )
       .replace(/\s+/g, " ")
       .trim();
     const name = displayName || id;
+    const hIndex = storedAuthor?.hIndex ?? null;
+    const affiliations = storedAuthor
+      ? normalizeAuthorAffiliations(storedAuthor.metadata.affiliations)
+      : [];
     const existing = authorByID.get(id);
     if (
       !existing ||
       existing.name === id ||
       (name !== id && name.localeCompare(existing.name) < 0)
     ) {
-      authorByID.set(id, { id, name });
+      authorByID.set(id, { id, name, hIndex, affiliations });
     }
   }
 
   return [...authorByID.values()].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function normalizeAuthorAffiliations(affiliations: OpenAlexAuthorPayload["affiliations"]) {
+  const affiliationByInstitution = new Map<
+    string,
+    {
+      institutionID: string | null;
+      institutionName: string;
+      years: Set<number>;
+    }
+  >();
+
+  for (const affiliation of Array.isArray(affiliations) ? affiliations : []) {
+    const rawInstitutionID = String(affiliation?.institution?.id || "").trim();
+    const institutionIDMatch =
+      rawInstitutionID.match(/(?:^|\/)(I\d+)\/?$/i) || rawInstitutionID.match(/\b(I\d+)\b/i);
+    const institutionID = institutionIDMatch ? String(institutionIDMatch[1]).toUpperCase() : null;
+    const institutionName = String(affiliation?.institution?.display_name || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!institutionID && !institutionName) continue;
+
+    const key = institutionID || institutionName.toLocaleLowerCase();
+    const existing = affiliationByInstitution.get(key) || {
+      institutionID,
+      institutionName: institutionName || institutionID || "Unknown institution",
+      years: new Set<number>(),
+    };
+    for (const rawYear of Array.isArray(affiliation?.years) ? affiliation.years : []) {
+      const year = Number.parseInt(String(rawYear), 10);
+      if (Number.isFinite(year) && year >= 1000 && year <= 2999) {
+        existing.years.add(year);
+      }
+    }
+    affiliationByInstitution.set(key, existing);
+  }
+
+  return [...affiliationByInstitution.values()]
+    .map((affiliation) => ({
+      institutionID: affiliation.institutionID,
+      institutionName: affiliation.institutionName,
+      years: [...affiliation.years].sort((left, right) => right - left),
+    }))
+    .filter((affiliation) => affiliation.years.length > 0)
+    .sort(
+      (left, right) =>
+        left.institutionName.localeCompare(right.institutionName) ||
+        String(left.institutionID || "").localeCompare(String(right.institutionID || "")),
+    );
 }
 
 function normalizeYear(value: string | undefined) {
@@ -1181,6 +1290,7 @@ function openCollectionCitationGraphWindow(graphData: CollectionGraphData) {
   renderCollectionCitationGraphWindow(popup, graphData, {
     physics: getGraphPhysicsSettings(),
     showTuningControls: getBooleanPref(GRAPH_SHOW_TUNING_CONTROLS_PREF, false),
+    minimumAuthorHIndex: getNumberPref(MINIMUM_AUTHOR_H_INDEX_PREF, 5, 0, 1000),
   });
 }
 
@@ -1596,6 +1706,12 @@ function normalizeOpenAlexID(value: string | undefined) {
   return match ? match[0].toUpperCase() : null;
 }
 
+function normalizeOpenAlexAuthorID(value: string | undefined) {
+  if (!value) return null;
+  const match = String(value).match(/A\d+/i);
+  return match ? match[0].toUpperCase() : null;
+}
+
 function normalizeCitationCount(value: number | string | undefined) {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     return Math.floor(value);
@@ -1694,11 +1810,16 @@ function getBooleanPref(key: string, fallback: boolean) {
   }
 }
 
-function getNumberPref(key: string, fallback: number) {
+function getNumberPref(
+  key: string,
+  fallback: number,
+  min = Number.NEGATIVE_INFINITY,
+  max = Number.POSITIVE_INFINITY,
+) {
   try {
     const value = Zotero.Prefs.get(`extensions.zotero-openalex.${key}`, true);
     const numeric = Number.parseInt(String(value), 10);
-    return Number.isFinite(numeric) ? numeric : fallback;
+    return Number.isFinite(numeric) ? Math.max(min, Math.min(max, numeric)) : fallback;
   } catch (_error) {
     return fallback;
   }
@@ -1744,6 +1865,87 @@ function buildOpenAlexParams(initialValues: Record<string, string> = {}) {
   if (apiKey) params.set("api_key", apiKey);
 
   return params;
+}
+
+async function backfillMissingAuthors(workIDs: Iterable<string>) {
+  try {
+    await hydrateAuthorsForWorks(workIDs);
+  } catch (error) {
+    Zotero.debug("OpenAlex: author metadata backfill failed");
+    Zotero.debug(error);
+  }
+}
+
+async function hydrateAuthorsForWorks(
+  workIDs: Iterable<string>,
+  { refresh = false }: { refresh?: boolean } = {},
+) {
+  const authorIDs = [...(await openAlexStore.getAuthorIDsForWorks(workIDs))].sort((left, right) =>
+    left.localeCompare(right),
+  );
+  if (!authorIDs.length) return 0;
+
+  let requestedAuthorIDs = authorIDs;
+  if (!refresh) {
+    const cachedAuthors = await openAlexStore.getAuthors(authorIDs);
+    requestedAuthorIDs = authorIDs.filter((authorID) => !cachedAuthors.has(authorID));
+  }
+  if (!requestedAuthorIDs.length) return 0;
+
+  const requestDelayMs = Math.max(0, getNumberPref("requestDelayMs", 1000));
+  const authorBatches = buildOpenAlexAuthorIDBatches(requestedAuthorIDs);
+  let storedCount = 0;
+  for (let batchIndex = 0; batchIndex < authorBatches.length; batchIndex++) {
+    const batch = authorBatches[batchIndex];
+    try {
+      const authors = await fetchOpenAlexAuthorsByIDs(batch);
+      const fetchedAt = new Date().toISOString();
+      await openAlexStore.executeTransaction(async () => {
+        for (const author of authors) {
+          const authorID = normalizeOpenAlexAuthorID(author.id);
+          if (!authorID || !batch.includes(authorID)) continue;
+          await openAlexStore.upsertAuthor(authorID, author, fetchedAt);
+          storedCount++;
+        }
+      });
+    } catch (error) {
+      Zotero.debug(`OpenAlex: failed fetching Author batch starting with ${batch[0]}`);
+      Zotero.debug(error);
+    }
+
+    if (requestDelayMs > 0 && batchIndex < authorBatches.length - 1) {
+      await delay(requestDelayMs);
+    }
+  }
+
+  return storedCount;
+}
+
+async function fetchOpenAlexAuthorsByIDs(authorIDs: Iterable<string>) {
+  const normalizedIDs = buildOpenAlexAuthorIDBatches(authorIDs)[0] || [];
+  if (!normalizedIDs.length) return [] as OpenAlexAuthor[];
+
+  const params = buildOpenAlexParams({
+    filter: `openalex:${normalizedIDs.join("|")}`,
+    per_page: String(normalizedIDs.length),
+  });
+  const response = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/authors?${params.toString()}`);
+  return Array.isArray(response?.results) ? (response.results as OpenAlexAuthor[]) : [];
+}
+
+function buildOpenAlexAuthorIDBatches(authorIDs: Iterable<string>) {
+  const normalizedIDs = [
+    ...new Set(
+      [...authorIDs]
+        .map(normalizeOpenAlexAuthorID)
+        .filter((authorID): authorID is string => Boolean(authorID)),
+    ),
+  ];
+  const batches: string[][] = [];
+  for (let offset = 0; offset < normalizedIDs.length; offset += OPENALEX_AUTHOR_BATCH_SIZE) {
+    batches.push(normalizedIDs.slice(offset, offset + OPENALEX_AUTHOR_BATCH_SIZE));
+  }
+  return batches;
 }
 
 async function fetchOpenAlexWorkByDOI(doi: string) {
@@ -1972,4 +2174,7 @@ export const __test__ = {
   buildArXivDOI,
   resolveDOIForLookup,
   normalizeOpenAlexAuthors,
+  normalizeAuthorAffiliations,
+  normalizeOpenAlexAuthorID,
+  buildOpenAlexAuthorIDBatches,
 };

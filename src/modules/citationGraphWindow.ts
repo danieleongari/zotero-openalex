@@ -1,6 +1,14 @@
+interface CollectionGraphAuthorAffiliation {
+  institutionID: string | null;
+  institutionName: string;
+  years: number[];
+}
+
 interface CollectionGraphAuthor {
   id: string;
   name: string;
+  hIndex?: number | null;
+  affiliations?: CollectionGraphAuthorAffiliation[];
 }
 
 interface CollectionGraphNode {
@@ -79,9 +87,20 @@ export interface AuthorGraphPublication {
 export interface AuthorGraphNode {
   id: string;
   name: string;
+  hIndex: number;
   itemCount: number;
   radius: number;
+  color: string;
+  affiliationTimeline: AuthorGraphAffiliationYear[];
   publications: AuthorGraphPublication[];
+}
+
+export interface AuthorGraphAffiliationYear {
+  year: number;
+  institutions: Array<{
+    id: string | null;
+    name: string;
+  }>;
 }
 
 export interface AuthorGraphEdge {
@@ -95,6 +114,98 @@ export interface AuthorGraphData {
   nodes: AuthorGraphNode[];
   edges: AuthorGraphEdge[];
   publicationCount: number;
+  omittedBelowHIndex: number;
+  omittedMissingHIndex: number;
+}
+
+export interface AuthorGraphFilterOptions {
+  excludeSingleWorkAuthors?: boolean;
+  excludeSingleWorkClusters?: boolean;
+}
+
+export interface AuthorComponentTarget {
+  x: number;
+  y: number;
+}
+
+export function buildAuthorComponentTargets(
+  componentSizes: number[],
+  minimumSpacing = 220,
+): AuthorComponentTarget[] {
+  const safeSizes = (Array.isArray(componentSizes) ? componentSizes : []).map((size) =>
+    Math.max(1, Number.isFinite(size) ? Math.floor(size) : 1),
+  );
+  if (!safeSizes.length) return [];
+
+  const estimatedRadii = safeSizes.map((size) => 70 + 24 * Math.sqrt(size));
+  const componentGap = Math.max(
+    28,
+    Math.min(56, Math.max(0, Number.isFinite(minimumSpacing) ? minimumSpacing : 220) * 0.22),
+  );
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  const angularSamples = 72;
+  const targets: AuthorComponentTarget[] = [{ x: 0, y: 0 }];
+
+  for (let index = 1; index < safeSizes.length; index++) {
+    const radius = estimatedRadii[index];
+    let bestTarget: AuthorComponentTarget | null = null;
+    let bestScore = Infinity;
+
+    for (let anchorIndex = 0; anchorIndex < targets.length; anchorIndex++) {
+      const anchor = targets[anchorIndex];
+      const tangentDistance = radius + estimatedRadii[anchorIndex] + componentGap;
+      for (let sample = 0; sample < angularSamples; sample++) {
+        const angle = (sample / angularSamples) * Math.PI * 2 + index * goldenAngle;
+        const candidate = {
+          x: anchor.x + Math.cos(angle) * tangentDistance,
+          y: anchor.y + Math.sin(angle) * tangentDistance,
+        };
+        const overlaps = targets.some((target, targetIndex) => {
+          const requiredDistance = radius + estimatedRadii[targetIndex] + componentGap;
+          return (
+            Math.hypot(candidate.x - target.x, candidate.y - target.y) < requiredDistance - 0.5
+          );
+        });
+        if (overlaps) continue;
+
+        let minX = candidate.x - radius;
+        let maxX = candidate.x + radius;
+        let minY = candidate.y - radius;
+        let maxY = candidate.y + radius;
+        for (let targetIndex = 0; targetIndex < targets.length; targetIndex++) {
+          const target = targets[targetIndex];
+          const targetRadius = estimatedRadii[targetIndex];
+          minX = Math.min(minX, target.x - targetRadius);
+          maxX = Math.max(maxX, target.x + targetRadius);
+          minY = Math.min(minY, target.y - targetRadius);
+          maxY = Math.max(maxY, target.y + targetRadius);
+        }
+        const width = maxX - minX;
+        const height = maxY - minY;
+        const score =
+          Math.max(width, height) * 1_000_000 +
+          width * height * 100 +
+          Math.hypot(candidate.x, candidate.y);
+        if (score < bestScore) {
+          bestScore = score;
+          bestTarget = candidate;
+        }
+      }
+    }
+
+    if (!bestTarget) {
+      const fallbackDistance =
+        estimatedRadii[0] + radius + componentGap + index * (radius + componentGap);
+      const fallbackAngle = index * goldenAngle;
+      bestTarget = {
+        x: Math.cos(fallbackAngle) * fallbackDistance,
+        y: Math.sin(fallbackAngle) * fallbackDistance,
+      };
+    }
+    targets.push(bestTarget);
+  }
+
+  return targets;
 }
 
 export function getAuthorMarkerRadius(itemCount: number) {
@@ -107,12 +218,73 @@ export function getAuthorEdgeWidth(sharedItemCount: number) {
   return Math.max(2.5, Math.min(9, 1 + 1.5 * Math.sqrt(safeCount)));
 }
 
-export function buildAuthorGraphData(items: AuthorGraphItemInput[]): AuthorGraphData {
+export function getViridisColor(hIndex: number) {
+  const anchors = [
+    [68, 1, 84],
+    [59, 82, 139],
+    [33, 145, 140],
+    [94, 201, 98],
+    [253, 231, 37],
+  ];
+  const normalized = Math.max(0, Math.min(100, Number.isFinite(hIndex) ? hIndex : 0)) / 100;
+  const scaled = normalized * (anchors.length - 1);
+  const lowerIndex = Math.min(anchors.length - 1, Math.floor(scaled));
+  const upperIndex = Math.min(anchors.length - 1, lowerIndex + 1);
+  const fraction = scaled - lowerIndex;
+  const channels = anchors[lowerIndex].map((channel, index) =>
+    Math.round(channel + (anchors[upperIndex][index] - channel) * fraction),
+  );
+  return `rgb(${channels[0]}, ${channels[1]}, ${channels[2]})`;
+}
+
+export function buildAuthorAffiliationTimeline(
+  affiliations: CollectionGraphAuthorAffiliation[],
+): AuthorGraphAffiliationYear[] {
+  const institutionsByYear = new Map<number, Map<string, { id: string | null; name: string }>>();
+
+  for (const affiliation of Array.isArray(affiliations) ? affiliations : []) {
+    const institutionID = String(affiliation?.institutionID || "").trim() || null;
+    const institutionName = String(affiliation?.institutionName || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!institutionID && !institutionName) continue;
+
+    for (const rawYear of Array.isArray(affiliation?.years) ? affiliation.years : []) {
+      const year = Number.parseInt(String(rawYear), 10);
+      if (!Number.isFinite(year) || year < 1000 || year > 2999) continue;
+      const institutions = institutionsByYear.get(year) || new Map();
+      const key = institutionID || institutionName.toLocaleLowerCase();
+      institutions.set(key, {
+        id: institutionID,
+        name: institutionName || institutionID || "Unknown institution",
+      });
+      institutionsByYear.set(year, institutions);
+    }
+  }
+
+  return [...institutionsByYear.entries()]
+    .sort((left, right) => right[0] - left[0])
+    .map(([year, institutions]) => ({
+      year,
+      institutions: [...institutions.values()].sort(
+        (left, right) =>
+          left.name.localeCompare(right.name) ||
+          String(left.id || "").localeCompare(String(right.id || "")),
+      ),
+    }));
+}
+
+export function buildAuthorGraphData(
+  items: AuthorGraphItemInput[],
+  minimumAuthorHIndex = 5,
+): AuthorGraphData {
   const authorStats = new Map<
     string,
     {
       names: Map<string, number>;
       publications: Map<number, AuthorGraphPublication>;
+      hIndex: number | null;
+      affiliations: CollectionGraphAuthorAffiliation[];
     }
   >();
   const authorsByItemID = new Map<number, Set<string>>();
@@ -127,6 +299,7 @@ export function buildAuthorGraphData(items: AuthorGraphItemInput[]): AuthorGraph
       year: typeof item.year === "number" && Number.isFinite(item.year) ? item.year : null,
     };
     const authorNameByID = new Map<string, string>();
+    const authorMetadataByID = new Map<string, CollectionGraphAuthor>();
     for (const author of Array.isArray(item.authors) ? item.authors : []) {
       const id = String(author?.id || "")
         .trim()
@@ -144,23 +317,52 @@ export function buildAuthorGraphData(items: AuthorGraphItemInput[]): AuthorGraph
       ) {
         authorNameByID.set(id, name);
       }
+      if (!authorMetadataByID.has(id) || authorMetadataByID.get(id)?.hIndex == null) {
+        authorMetadataByID.set(id, author);
+      }
     }
 
     authorsByItemID.set(item.itemID, new Set(authorNameByID.keys()));
     for (const [id, name] of authorNameByID) {
+      const author = authorMetadataByID.get(id);
       const stats = authorStats.get(id) || {
         names: new Map<string, number>(),
         publications: new Map<number, AuthorGraphPublication>(),
+        hIndex: null,
+        affiliations: [],
       };
       stats.names.set(name, (stats.names.get(name) || 0) + 1);
       stats.publications.set(item.itemID, publication);
+      if (
+        typeof author?.hIndex === "number" &&
+        Number.isFinite(author.hIndex) &&
+        author.hIndex >= 0
+      ) {
+        stats.hIndex = Math.floor(author.hIndex);
+      }
+      if (Array.isArray(author?.affiliations) && author.affiliations.length) {
+        stats.affiliations.push(...author.affiliations);
+      }
       authorStats.set(id, stats);
     }
   }
 
   const nodes: AuthorGraphNode[] = [];
+  const normalizedMinimumHIndex = Math.max(
+    0,
+    Math.min(1000, Number.isFinite(minimumAuthorHIndex) ? Math.floor(minimumAuthorHIndex) : 5),
+  );
+  let omittedBelowHIndex = 0;
+  let omittedMissingHIndex = 0;
   for (const [id, stats] of authorStats) {
-    if (stats.publications.size < 2) continue;
+    if (stats.hIndex === null) {
+      omittedMissingHIndex++;
+      continue;
+    }
+    if (stats.hIndex < normalizedMinimumHIndex) {
+      omittedBelowHIndex++;
+      continue;
+    }
 
     const rankedNames = [...stats.names.entries()]
       .filter(([name]) => name && name !== id)
@@ -175,8 +377,11 @@ export function buildAuthorGraphData(items: AuthorGraphItemInput[]): AuthorGraph
     nodes.push({
       id,
       name: rankedNames[0]?.[0] || id,
+      hIndex: stats.hIndex,
       itemCount: publications.length,
       radius: getAuthorMarkerRadius(publications.length),
+      color: getViridisColor(stats.hIndex),
+      affiliationTimeline: buildAuthorAffiliationTimeline(stats.affiliations),
       publications,
     });
   }
@@ -218,7 +423,85 @@ export function buildAuthorGraphData(items: AuthorGraphItemInput[]): AuthorGraph
         left.source.localeCompare(right.source) || left.target.localeCompare(right.target),
     );
 
-  return { nodes, edges, publicationCount: contributingItemIDs.size };
+  return {
+    nodes,
+    edges,
+    publicationCount: contributingItemIDs.size,
+    omittedBelowHIndex,
+    omittedMissingHIndex,
+  };
+}
+
+export function filterAuthorGraphData(
+  graph: AuthorGraphData,
+  options: AuthorGraphFilterOptions = {},
+): AuthorGraphData {
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  const nodeByID = new Map(nodes.map((node) => [node.id, node]));
+  const excludedAuthorIDs = new Set<string>();
+
+  if (options.excludeSingleWorkClusters) {
+    const neighborsByID = new Map(nodes.map((node) => [node.id, new Set<string>()]));
+    for (const edge of edges) {
+      if (!nodeByID.has(edge.source) || !nodeByID.has(edge.target) || edge.source === edge.target) {
+        continue;
+      }
+      neighborsByID.get(edge.source)?.add(edge.target);
+      neighborsByID.get(edge.target)?.add(edge.source);
+    }
+
+    const visitedAuthorIDs = new Set<string>();
+    for (const node of nodes) {
+      if (visitedAuthorIDs.has(node.id)) continue;
+      const component: AuthorGraphNode[] = [];
+      const pendingAuthorIDs = [node.id];
+      visitedAuthorIDs.add(node.id);
+      while (pendingAuthorIDs.length) {
+        const authorID = pendingAuthorIDs.pop();
+        const author = authorID ? nodeByID.get(authorID) : null;
+        if (author) component.push(author);
+        for (const neighborID of neighborsByID.get(authorID || "") || []) {
+          if (visitedAuthorIDs.has(neighborID)) continue;
+          visitedAuthorIDs.add(neighborID);
+          pendingAuthorIDs.push(neighborID);
+        }
+      }
+
+      const sharedWorkIDs = new Set(
+        component.flatMap((author) => author.publications.map((publication) => publication.itemID)),
+      );
+      if (
+        sharedWorkIDs.size === 1 &&
+        component.every((author) => author.publications.length === 1)
+      ) {
+        for (const author of component) excludedAuthorIDs.add(author.id);
+      }
+    }
+  }
+
+  if (options.excludeSingleWorkAuthors) {
+    for (const node of nodes) {
+      if (node.publications.length === 1) excludedAuthorIDs.add(node.id);
+    }
+  }
+
+  const filteredNodes = nodes.filter((node) => !excludedAuthorIDs.has(node.id));
+  const retainedAuthorIDs = new Set(filteredNodes.map((node) => node.id));
+  const filteredEdges = edges.filter(
+    (edge) => retainedAuthorIDs.has(edge.source) && retainedAuthorIDs.has(edge.target),
+  );
+  const contributingItemIDs = new Set(
+    filteredNodes.flatMap((node) => node.publications.map((publication) => publication.itemID)),
+  );
+
+  return {
+    nodes: filteredNodes,
+    edges: filteredEdges,
+    publicationCount: contributingItemIDs.size,
+    omittedBelowHIndex: graph.omittedBelowHIndex,
+    omittedMissingHIndex: graph.omittedMissingHIndex,
+  };
 }
 
 export function buildCitationsPerYearOverlapOffsets(count: number, markerRadius = 6) {
@@ -450,6 +733,7 @@ export interface GraphPhysicsSettings {
 interface CollectionGraphRenderOptions {
   physics?: Partial<GraphPhysicsSettings>;
   showTuningControls?: boolean;
+  minimumAuthorHIndex?: number;
 }
 
 type GraphPhysicsFieldKey = keyof GraphPhysicsSettings;
@@ -1454,10 +1738,25 @@ export function renderCollectionCitationGraphWindow(
   const buildCitationsPerYearOverlapOffsetsPayload = buildCitationsPerYearOverlapOffsets.toString();
   const filterCitationsPerYearEdgesPayload = filterCitationsPerYearEdges.toString();
   const buildCitationsPerYearLayoutPayload = buildCitationsPerYearLayout.toString();
+  const buildAuthorComponentTargetsPayload = buildAuthorComponentTargets.toString();
   const getAuthorMarkerRadiusPayload = getAuthorMarkerRadius.toString();
   const getAuthorEdgeWidthPayload = getAuthorEdgeWidth.toString();
+  const getViridisColorPayload = getViridisColor.toString();
+  const buildAuthorAffiliationTimelinePayload = buildAuthorAffiliationTimeline.toString();
   const buildAuthorGraphDataPayload = buildAuthorGraphData.toString();
+  const filterAuthorGraphDataPayload = filterAuthorGraphData.toString();
   const showTuningControlsPayload = JSON.stringify(Boolean(options.showTuningControls));
+  const minimumAuthorHIndexPayload = JSON.stringify(
+    Math.max(
+      0,
+      Math.min(
+        1000,
+        Number.isFinite(options.minimumAuthorHIndex)
+          ? Math.floor(options.minimumAuthorHIndex as number)
+          : 5,
+      ),
+    ),
+  );
   const html = `<!doctype html>
 <html>
 <head>
@@ -1647,6 +1946,107 @@ export function renderCollectionCitationGraphWindow(
       margin-bottom: 10px;
     }
 
+    .author-details-section-title {
+      color: #dcecff;
+      font-size: 11px;
+      font-weight: 600;
+      margin: 12px 0 6px;
+    }
+
+    .author-h-index {
+      color: #d6e4f2;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .author-affiliations {
+      display: grid;
+      gap: 6px;
+      font-size: 11px;
+      color: #bfd2e5;
+    }
+
+    .author-affiliation-row {
+      display: grid;
+      grid-template-columns: 3.5em minmax(0, 1fr);
+      gap: 8px;
+    }
+
+    .author-affiliation-year {
+      color: #8fb3d4;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .author-affiliation-empty {
+      color: var(--muted);
+      font-size: 11px;
+      font-style: italic;
+    }
+
+    .author-graph-controls {
+      position: absolute;
+      left: 12px;
+      bottom: 10px;
+      z-index: 2;
+      display: grid;
+      gap: 6px;
+      width: 220px;
+    }
+
+    .author-color-legend {
+      border: 1px solid rgba(95, 118, 146, 0.6);
+      border-radius: 6px;
+      background: rgba(12, 21, 31, 0.88);
+      padding: 7px 9px;
+      color: #b9d1e6;
+      font-size: 10px;
+      pointer-events: none;
+    }
+
+    .author-filter-toggle {
+      width: 100%;
+      border: 1px solid rgba(95, 118, 146, 0.72);
+      border-radius: 6px;
+      background: rgba(12, 21, 31, 0.92);
+      color: #c9d9e8;
+      padding: 6px 9px;
+      font: inherit;
+      font-size: 11px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .author-filter-toggle:hover {
+      border-color: #7ca7cd;
+      background: rgba(26, 43, 61, 0.96);
+    }
+
+    .author-filter-toggle[aria-pressed="true"] {
+      border-color: #74c7a5;
+      background: rgba(31, 91, 72, 0.9);
+      color: #effff8;
+    }
+
+    .author-color-legend-gradient {
+      height: 8px;
+      margin: 5px 0 3px;
+      border-radius: 4px;
+      background: linear-gradient(
+        90deg,
+        rgb(68, 1, 84),
+        rgb(59, 82, 139),
+        rgb(33, 145, 140),
+        rgb(94, 201, 98),
+        rgb(253, 231, 37)
+      );
+    }
+
+    .author-color-legend-scale {
+      display: flex;
+      justify-content: space-between;
+      font-variant-numeric: tabular-nums;
+    }
+
     .author-publications {
       margin: 0;
       padding-left: 20px;
@@ -1740,18 +2140,20 @@ export function renderCollectionCitationGraphWindow(
     }
 
     .author-node.hover-focus {
-      fill: #7de8ff;
       stroke: #e5fbff;
+      stroke-width: 2.4px;
+      filter: drop-shadow(0 0 3px rgba(125, 232, 255, 0.75));
     }
 
     .author-node.hover-coauthor {
-      fill: #a9efb2;
       stroke: #dffff0;
+      stroke-width: 1.8px;
     }
 
     .author-node.selected {
-      fill: var(--node-active);
       stroke: #fff8d8;
+      stroke-width: 2.6px;
+      filter: drop-shadow(0 0 3px rgba(244, 205, 120, 0.8));
     }
 
     .author-label.hover-focus,
@@ -2020,8 +2422,17 @@ export function renderCollectionCitationGraphWindow(
           </g>
         </svg>
         <div class="empty-state" id="author-empty-state">
-          <div class="empty-title">No recurring authors to display</div>
-          <div class="empty-text">No OpenAlex author is associated with at least two eligible items.</div>
+          <div class="empty-title" id="author-empty-title">No authors to display</div>
+          <div class="empty-text" id="author-empty-text">No OpenAlex author has metadata that meets the configured h-index threshold.</div>
+        </div>
+        <div class="author-graph-controls">
+          <div class="author-color-legend" aria-label="Author node color legend">
+            <div>h-index</div>
+            <div class="author-color-legend-gradient"></div>
+            <div class="author-color-legend-scale"><span>0</span><span>50</span><span>100+</span></div>
+          </div>
+          <button class="author-filter-toggle" id="exclude-single-work-authors" type="button" aria-pressed="false" title="Hide every author associated with only one work in the current graph.">Exclude single-work authors</button>
+          <button class="author-filter-toggle" id="exclude-single-work-clusters" type="button" aria-pressed="false" title="Hide disconnected groups whose authors all appear only in the same single work.">Exclude single-work clusters</button>
         </div>
       </div>
       <aside class="author-details" id="author-details" aria-live="polite"></aside>
@@ -2046,11 +2457,16 @@ export function renderCollectionCitationGraphWindow(
     const buildCitationsPerYearOverlapOffsets = ${buildCitationsPerYearOverlapOffsetsPayload};
     const filterCitationsPerYearEdges = ${filterCitationsPerYearEdgesPayload};
     const buildCitationsPerYearLayout = ${buildCitationsPerYearLayoutPayload};
+    const buildAuthorComponentTargets = ${buildAuthorComponentTargetsPayload};
     const getAuthorMarkerRadius = ${getAuthorMarkerRadiusPayload};
     const getAuthorEdgeWidth = ${getAuthorEdgeWidthPayload};
+    const getViridisColor = ${getViridisColorPayload};
+    const buildAuthorAffiliationTimeline = ${buildAuthorAffiliationTimelinePayload};
     const buildAuthorGraphData = ${buildAuthorGraphDataPayload};
+    const filterAuthorGraphData = ${filterAuthorGraphDataPayload};
     const physicsFieldKeys = Object.keys(physicsFieldConfig);
     const showTuningControls = ${showTuningControlsPayload};
+    const minimumAuthorHIndex = ${minimumAuthorHIndexPayload};
     const YEARLY_MARKER_RADIUS = 6;
     const NS = "http://www.w3.org/2000/svg";
     const collectionEl = document.getElementById("collection-name");
@@ -2072,7 +2488,14 @@ export function renderCollectionCitationGraphWindow(
     const authorNodesLayer = document.getElementById("author-nodes");
     const authorLabelsLayer = document.getElementById("author-labels");
     const authorEmptyStateEl = document.getElementById("author-empty-state");
+    const authorEmptyTextEl = document.getElementById("author-empty-text");
     const authorDetailsEl = document.getElementById("author-details");
+    const excludeSingleWorkAuthorsButtonEl = document.getElementById(
+      "exclude-single-work-authors",
+    );
+    const excludeSingleWorkClustersButtonEl = document.getElementById(
+      "exclude-single-work-clusters",
+    );
     const graphShell = document.querySelector(".graph-shell");
     const tooltipEl = document.getElementById("node-tooltip");
     const emptyStateEl = document.getElementById("empty-state");
@@ -2086,7 +2509,10 @@ export function renderCollectionCitationGraphWindow(
 
     const safeNodes = Array.isArray(data && data.nodes) ? data.nodes : [];
     const safeEdges = Array.isArray(data && data.edges) ? data.edges : [];
-    const authorGraph = buildAuthorGraphData(safeNodes);
+    const completeAuthorGraph = buildAuthorGraphData(safeNodes, minimumAuthorHIndex);
+    let excludeSingleWorkAuthors = false;
+    let excludeSingleWorkClusters = false;
+    let authorGraph = completeAuthorGraph;
 
     const settings = { ...physicsSettings };
 
@@ -2435,8 +2861,8 @@ export function renderCollectionCitationGraphWindow(
       }
     }
 
-    const authorNodeByID = new Map();
-    const authorNodes = authorGraph.nodes.map((node, index) => {
+    const allAuthorNodeByID = new Map();
+    const allAuthorNodes = completeAuthorGraph.nodes.map((node, index) => {
       const angle = index * Math.PI * (3 - Math.sqrt(5));
       const placementRadius = 22 * Math.sqrt(index);
       const simNode = {
@@ -2450,45 +2876,122 @@ export function renderCollectionCitationGraphWindow(
         labelEl: null,
         labelBounds: null,
       };
-      authorNodeByID.set(node.id, simNode);
+      allAuthorNodeByID.set(node.id, simNode);
       return simNode;
     });
-    const authorEdges = authorGraph.edges
+    const allAuthorEdges = completeAuthorGraph.edges
       .map((edge) => ({
         ...edge,
-        source: authorNodeByID.get(edge.source),
-        target: authorNodeByID.get(edge.target),
+        source: allAuthorNodeByID.get(edge.source),
+        target: allAuthorNodeByID.get(edge.target),
         lineEl: null,
       }))
       .filter((edge) => edge.source && edge.target && edge.source !== edge.target);
-    const authorNeighborsByID = new Map();
-    for (let i = 0; i < authorNodes.length; i++) {
-      authorNeighborsByID.set(authorNodes[i].id, new Set());
-    }
-    for (let i = 0; i < authorEdges.length; i++) {
-      const edge = authorEdges[i];
-      authorNeighborsByID.get(edge.source.id).add(edge.target.id);
-      authorNeighborsByID.get(edge.target.id).add(edge.source.id);
-    }
+    let authorNodeByID = new Map();
+    let authorNodes = [];
+    let authorEdges = [];
+    let authorNeighborsByID = new Map();
 
-    let authorComponentIndex = 0;
-    for (let i = 0; i < authorNodes.length; i++) {
-      const root = authorNodes[i];
-      if (typeof root.componentIndex === "number") continue;
-      const pendingAuthorIDs = [root.id];
-      root.componentIndex = authorComponentIndex;
-      while (pendingAuthorIDs.length) {
-        const authorID = pendingAuthorIDs.pop();
-        const neighborIDs = authorNeighborsByID.get(authorID) || new Set();
-        for (const neighborID of neighborIDs) {
-          const neighbor = authorNodeByID.get(neighborID);
-          if (!neighbor || typeof neighbor.componentIndex === "number") continue;
-          neighbor.componentIndex = authorComponentIndex;
-          pendingAuthorIDs.push(neighbor.id);
+    function rebuildAuthorGraphModel() {
+      const retainedAuthorIDs = new Set(authorGraph.nodes.map((node) => node.id));
+      authorNodes = allAuthorNodes.filter((node) => retainedAuthorIDs.has(node.id));
+      authorNodeByID = new Map(authorNodes.map((node) => [node.id, node]));
+      authorEdges = allAuthorEdges.filter(
+        (edge) => retainedAuthorIDs.has(edge.source.id) && retainedAuthorIDs.has(edge.target.id),
+      );
+      authorNeighborsByID = new Map(authorNodes.map((node) => [node.id, new Set()]));
+
+      for (let i = 0; i < allAuthorNodes.length; i++) {
+        const node = allAuthorNodes[i];
+        delete node.componentIndex;
+        node.fixed = false;
+        if (node.circleEl) {
+          node.circleEl.style.display = retainedAuthorIDs.has(node.id) ? "" : "none";
+        }
+        if (node.labelEl) {
+          node.labelEl.style.display = retainedAuthorIDs.has(node.id) ? "" : "none";
         }
       }
-      authorComponentIndex += 1;
+      for (let i = 0; i < allAuthorEdges.length; i++) {
+        const edge = allAuthorEdges[i];
+        if (edge.lineEl) {
+          edge.lineEl.style.display =
+            retainedAuthorIDs.has(edge.source.id) && retainedAuthorIDs.has(edge.target.id)
+              ? ""
+              : "none";
+        }
+      }
+
+      for (let i = 0; i < authorEdges.length; i++) {
+        const edge = authorEdges[i];
+        authorNeighborsByID.get(edge.source.id).add(edge.target.id);
+        authorNeighborsByID.get(edge.target.id).add(edge.source.id);
+      }
+
+      let authorComponentIndex = 0;
+      for (let i = 0; i < authorNodes.length; i++) {
+        const root = authorNodes[i];
+        if (typeof root.componentIndex === "number") continue;
+        const pendingAuthorIDs = [root.id];
+        root.componentIndex = authorComponentIndex;
+        while (pendingAuthorIDs.length) {
+          const authorID = pendingAuthorIDs.pop();
+          const neighborIDs = authorNeighborsByID.get(authorID) || new Set();
+          for (const neighborID of neighborIDs) {
+            const neighbor = authorNodeByID.get(neighborID);
+            if (!neighbor || typeof neighbor.componentIndex === "number") continue;
+            neighbor.componentIndex = authorComponentIndex;
+            pendingAuthorIDs.push(neighbor.id);
+          }
+        }
+        authorComponentIndex += 1;
+      }
+
+      const authorComponentsByIndex = new Map();
+      for (let i = 0; i < authorNodes.length; i++) {
+        const node = authorNodes[i];
+        const component = authorComponentsByIndex.get(node.componentIndex) || {
+          componentIndex: node.componentIndex,
+          nodes: [],
+          targetX: 0,
+          targetY: 0,
+        };
+        component.nodes.push(node);
+        authorComponentsByIndex.set(node.componentIndex, component);
+      }
+      const authorComponents = [...authorComponentsByIndex.values()].sort(
+        (left, right) =>
+          right.nodes.length - left.nodes.length ||
+          String(left.nodes[0]?.name || "").localeCompare(String(right.nodes[0]?.name || "")),
+      );
+      const authorComponentTargets = buildAuthorComponentTargets(
+        authorComponents.map((component) => component.nodes.length),
+        Math.max(140, settings.linkDistance),
+      );
+      const authorLocalGoldenAngle = Math.PI * (3 - Math.sqrt(5));
+      for (let componentOrder = 0; componentOrder < authorComponents.length; componentOrder++) {
+        const component = authorComponents[componentOrder];
+        const target = authorComponentTargets[componentOrder] || { x: 0, y: 0 };
+        component.targetX = target.x;
+        component.targetY = target.y;
+        component.nodes.sort(
+          (left, right) => left.name.localeCompare(right.name) || left.id.localeCompare(right.id),
+        );
+        for (let nodeIndex = 0; nodeIndex < component.nodes.length; nodeIndex++) {
+          const node = component.nodes[nodeIndex];
+          const localRadius = 34 * Math.sqrt(nodeIndex);
+          const localAngle = nodeIndex * authorLocalGoldenAngle;
+          node.componentTargetX = target.x;
+          node.componentTargetY = target.y;
+          node.x = target.x + Math.cos(localAngle) * localRadius;
+          node.y = target.y + Math.sin(localAngle) * localRadius;
+          node.vx = 0;
+          node.vy = 0;
+        }
+      }
     }
+
+    rebuildAuthorGraphModel();
 
     function renderSummary() {
       if (!summaryBarEl) {
@@ -2501,6 +3004,8 @@ export function renderCollectionCitationGraphWindow(
         addSummaryPill("Authors", authorNodes.length);
         addSummaryPill("Coauthor links", authorEdges.length);
         addSummaryPill("Publications", authorGraph.publicationCount);
+        addSummaryPill("Hidden (below h-index)", authorGraph.omittedBelowHIndex);
+        addSummaryPill("Hidden (missing h-index)", authorGraph.omittedMissingHIndex);
       } else if (activeView === "year") {
         addSummaryPill("Markers", yearlyNodes.length);
         addSummaryPill("Visible edges", yearlyEdges.length);
@@ -3059,9 +3564,16 @@ export function renderCollectionCitationGraphWindow(
       const node = authorNodes[i];
       const circleEl = document.createElementNS(NS, "circle");
       circleEl.setAttribute("class", "node author-node");
+      circleEl.style.fill = node.color;
       circleEl.style.cursor = "pointer";
       const titleEl = document.createElementNS(NS, "title");
-      titleEl.textContent = node.name + "\\n" + node.itemCount + " publications";
+      titleEl.textContent =
+        node.name +
+        "\\nh-index: " +
+        node.hIndex +
+        "\\n" +
+        node.itemCount +
+        " publications";
       circleEl.appendChild(titleEl);
       const labelEl = createAuthorLabel(node);
       node.circleEl = circleEl;
@@ -3174,6 +3686,16 @@ export function renderCollectionCitationGraphWindow(
       titleEl.textContent = node.name;
       authorDetailsEl.appendChild(titleEl);
 
+      const hIndexEl = document.createElement("div");
+      hIndexEl.className = "author-h-index";
+      hIndexEl.textContent = "h-index: " + node.hIndex;
+      authorDetailsEl.appendChild(hIndexEl);
+
+      const publicationsTitleEl = document.createElement("div");
+      publicationsTitleEl.className = "author-details-section-title";
+      publicationsTitleEl.textContent = "Related publications";
+      authorDetailsEl.appendChild(publicationsTitleEl);
+
       const countEl = document.createElement("div");
       countEl.className = "author-details-count";
       countEl.textContent = node.itemCount + (node.itemCount === 1 ? " publication" : " publications");
@@ -3190,6 +3712,37 @@ export function renderCollectionCitationGraphWindow(
         listEl.appendChild(itemEl);
       }
       authorDetailsEl.appendChild(listEl);
+
+      const affiliationTitleEl = document.createElement("div");
+      affiliationTitleEl.className = "author-details-section-title";
+      affiliationTitleEl.textContent = "Institution history";
+      authorDetailsEl.appendChild(affiliationTitleEl);
+
+      if (Array.isArray(node.affiliationTimeline) && node.affiliationTimeline.length) {
+        const affiliationsEl = document.createElement("div");
+        affiliationsEl.className = "author-affiliations";
+        for (let i = 0; i < node.affiliationTimeline.length; i++) {
+          const entry = node.affiliationTimeline[i];
+          const rowEl = document.createElement("div");
+          rowEl.className = "author-affiliation-row";
+          const yearEl = document.createElement("span");
+          yearEl.className = "author-affiliation-year";
+          yearEl.textContent = String(entry.year);
+          const institutionsEl = document.createElement("span");
+          institutionsEl.textContent = entry.institutions
+            .map((institution) => institution.name)
+            .join(", ");
+          rowEl.appendChild(yearEl);
+          rowEl.appendChild(institutionsEl);
+          affiliationsEl.appendChild(rowEl);
+        }
+        authorDetailsEl.appendChild(affiliationsEl);
+      } else {
+        const emptyAffiliationsEl = document.createElement("div");
+        emptyAffiliationsEl.className = "author-affiliation-empty";
+        emptyAffiliationsEl.textContent = "No affiliation history available";
+        authorDetailsEl.appendChild(emptyAffiliationsEl);
+      }
     }
 
     function selectAuthor(authorID) {
@@ -3894,13 +4447,13 @@ export function renderCollectionCitationGraphWindow(
           const distance = Math.sqrt(distanceSquared);
           const separatesComponents = left.componentIndex !== right.componentIndex;
           const repulsionRange = Math.max(
-            effectiveMaxRepulsionDistance * (separatesComponents ? 2.5 : 1.5),
-            settings.linkDistance * (separatesComponents ? 4 : 2),
+            effectiveMaxRepulsionDistance * (separatesComponents ? 1.2 : 1.5),
+            settings.linkDistance * (separatesComponents ? 1.5 : 2),
           );
           if (distance > repulsionRange) continue;
 
           const force =
-            (settings.charge * (separatesComponents ? 4 : 2) * alphaValue) /
+            (settings.charge * (separatesComponents ? 1.35 : 2) * alphaValue) /
             Math.max(settings.minRepulsionDistanceSq, distanceSquared);
           const forceX = (dx / distance) * force;
           const forceY = (dy / distance) * force;
@@ -3943,9 +4496,11 @@ export function renderCollectionCitationGraphWindow(
       for (let i = 0; i < authorNodes.length; i++) {
         const node = authorNodes[i];
         if (authorNodeIsAnchored(node)) continue;
-        const authorCenterStrength = settings.centerStrength * 0.25;
-        node.vx += -node.x * authorCenterStrength * alphaValue;
-        node.vy += -node.y * authorCenterStrength * alphaValue;
+        const authorCenterStrength = settings.centerStrength * 0.4;
+        node.vx +=
+          (node.componentTargetX - node.x) * authorCenterStrength * alphaValue;
+        node.vy +=
+          (node.componentTargetY - node.y) * authorCenterStrength * alphaValue;
       }
     }
 
@@ -4033,6 +4588,41 @@ export function renderCollectionCitationGraphWindow(
       }
     }
 
+    function applyAuthorGraphFilters() {
+      setHoveredAuthor(null);
+      selectAuthor(null);
+      authorGraph = filterAuthorGraphData(completeAuthorGraph, {
+        excludeSingleWorkAuthors,
+        excludeSingleWorkClusters,
+      });
+      rebuildAuthorGraphModel();
+      authorTickCount = 0;
+      authorFittedAfterWarmup = false;
+      authorFittedAfterSettle = false;
+      authorTransformInitialized = false;
+
+      excludeSingleWorkAuthorsButtonEl.setAttribute(
+        "aria-pressed",
+        String(excludeSingleWorkAuthors),
+      );
+      excludeSingleWorkClustersButtonEl.setAttribute(
+        "aria-pressed",
+        String(excludeSingleWorkClusters),
+      );
+
+      renderAuthorFrame();
+      renderSummary();
+      updateEmptyState();
+      if (activeView === "authors") {
+        fitAuthorGraph(settings.fitPadding);
+        if (authorNodes.length) {
+          restartAuthorSimulation(settings.initialAlpha);
+        } else {
+          authorRunning = false;
+        }
+      }
+    }
+
     let graphSimulationPaused = false;
 
     function updateEmptyState() {
@@ -4043,6 +4633,10 @@ export function renderCollectionCitationGraphWindow(
       if (activeView === "authors") {
         emptyStateEl.style.display = "none";
         authorEmptyStateEl.style.display = authorNodes.length ? "none" : "block";
+        authorEmptyTextEl.textContent =
+          excludeSingleWorkAuthors || excludeSingleWorkClusters
+            ? "No authors remain after applying the Co-Authors filters."
+            : "No OpenAlex author has metadata that meets the configured h-index threshold.";
         return;
       }
 
@@ -4507,6 +5101,18 @@ export function renderCollectionCitationGraphWindow(
     }
     if (authorsViewButtonEl) {
       authorsViewButtonEl.addEventListener("click", () => setActiveView("authors", false));
+    }
+    if (excludeSingleWorkAuthorsButtonEl) {
+      excludeSingleWorkAuthorsButtonEl.addEventListener("click", () => {
+        excludeSingleWorkAuthors = !excludeSingleWorkAuthors;
+        applyAuthorGraphFilters();
+      });
+    }
+    if (excludeSingleWorkClustersButtonEl) {
+      excludeSingleWorkClustersButtonEl.addEventListener("click", () => {
+        excludeSingleWorkClusters = !excludeSingleWorkClusters;
+        applyAuthorGraphFilters();
+      });
     }
 
     window.addEventListener("resize", () => {

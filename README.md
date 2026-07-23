@@ -12,7 +12,7 @@ The plugin stores machine-readable fields in each item's `Extra` field:
 
 Only `openalex.*` lines are parsed and managed by the plugin.
 
-The complete OpenAlex Work response is also cached locally in
+The complete OpenAlex Work and Author responses are also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
 
@@ -23,17 +23,17 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 
 - Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata.
 - Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
-- Stores the complete OpenAlex Work JSON in a local SQLite database.
+- Stores complete OpenAlex Work and Author JSON in a local SQLite database.
 - Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
 - Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing which article is citing what, among the items in the Collection or its SubCollections. Graphs read references from SQLite and only request OpenAlex metadata that is missing from the cache.
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing citations, citations per year, and co-authors among the items in the Collection or its SubCollections. Graphs read metadata from SQLite and only request OpenAlex metadata that is missing from the cache.
 
 ## Installation
 
-1. Download the latest `.xpi` from this repository's releases.
-2. Open Zotero.
-3. Install the `.xpi` as a plugin.
-4. Restart Zotero if requested.
+1. Download the latest `.xpi` from this repository's [releases](https://github.com/danieleongari/zotero-openalex/releases)
+2. Open Zotero
+3. Go to `Tools > Plugins > Gear Symbol on the top right > Install Plugin from File...`
+4. Select the downloaded `.xpi` file and click `Open`
 
 ## Usage
 
@@ -49,7 +49,8 @@ For a single item, Zotero shows a direct result message. For multiple items, Zot
 
 When enabled, startup sync scans regular items and updates those that are missing metadata, have
 stale citation dates, or do not yet have a complete SQLite cache record. The first startup after
-installing this version can therefore take longer while existing `Extra` metadata is backfilled.
+installing this version can therefore take longer while existing Work and Author metadata is
+backfilled.
 
 ### Usage: Custom Settings
 
@@ -60,6 +61,13 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `staleMonths` (default `3`): months after which the number of citations is updated.
 - `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
 - `showGraphTuningControls` (default `false`): show tunable graph settings directly in the Citation Graph window.
+- `minimumAuthorHIndex` (default `5`): hide authors whose cached h-index is below this
+  inclusive threshold. Authors without h-index metadata are also hidden.
+
+The Metadata Cache section shows the number of cached Works and Authors. Its cleanup action compares
+the database with non-deleted items in all user and group libraries, removes Works no longer present
+in Zotero, and then removes Authors with no remaining related Works. Cleanup is local-only and makes
+no API requests.
 
 When `showGraphTuningControls` is enabled, the Citation Graph window shows a tuning panel with
 all graph settings and a `Regenerate` button. Wheel and trackpad zoom are normalized for consistent,
@@ -69,6 +77,11 @@ the value is saved for future graph windows.
 Graph layout treats every visible paper title and its node as one collision area. Titles that appear
 after zooming or hovering briefly reheat the layout so they do not cover other visible titles or
 nodes; hidden titles do not consume graph space. Citation edges can still pass behind title text.
+In Co-Authors, disconnected collaboration groups use compact circle-packed layout anchors so
+independent networks remain close but do not overlap, without boxes or group labels. Two graph-local
+buttons beside the h-index legend can hide authors associated with only one work or hide entire
+disconnected groups whose authors all belong exclusively to the same work. Author details list
+related publications before institution history.
 
 These and other settings are also customizable via: Edit > Settings > Advanced > Config Editor > `extensions.zotero-openalex.*`
 
@@ -93,8 +106,8 @@ Get an OpenAlex API key at:
 - The API key is stored in local Zotero preferences.
 - The plugin does not write your API key into item metadata.
 - Requests are sent to the OpenAlex API endpoint (`https://api.openalex.org`).
-- Complete Work responses are stored locally in `zotero-openalex.sqlite`. This file remains on the
-  device and is not synchronized through Zotero Sync.
+- Complete Work and Author responses are stored locally in `zotero-openalex.sqlite`. This file
+  remains on the device and is not synchronized through Zotero Sync.
 
 ## Development (Developer)
 
@@ -195,7 +208,7 @@ assets above; its XPI manifest version and `update.json` version must match the 
 - `src/addon.ts`: addon state container.
 - `src/hooks.ts`: lifecycle hooks (`onStartup`, window load/unload, shutdown).
 - `src/modules/openalex.ts`: OpenAlex logic, metadata parsing/upsert, menu wiring, startup sync, citations column.
-- `src/modules/openalexStore.ts`: versioned SQLite storage for complete OpenAlex Work responses.
+- `src/modules/openalexStore.ts`: versioned SQLite storage for complete OpenAlex Work and Author responses.
 - `addon/`: runtime assets (`manifest.json`, `bootstrap.js`, prefs/panes assets).
 - `zotero-plugin.config.ts`: scaffold build and release configuration.
 
@@ -205,7 +218,7 @@ assets above; its XPI manifest version and `update.json` version must match the 
 - If updates are skipped, verify the item has a DOI (field or `Extra`).
 - If startup sync feels slow, increase `requestDelayMs` cautiously and adjust `staleMonths`.
 - If the first sync after upgrading is slow, allow it to finish populating `zotero-openalex.sqlite`.
-  Later citation graphs will reuse these cached Work records.
+  Later citation graphs will reuse the cached Work and Author records.
 
 ## Acknowledgements
 

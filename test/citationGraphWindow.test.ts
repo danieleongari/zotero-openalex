@@ -1,9 +1,12 @@
 import { assert } from "chai";
 import {
+  buildAuthorAffiliationTimeline,
+  buildAuthorComponentTargets,
   buildAuthorGraphData,
   buildCitationsPerYearLayout,
   buildCitationsPerYearOverlapOffsets,
   buildGraphNodeFootprint,
+  filterAuthorGraphData,
   filterCitationsPerYearEdges,
   getGraphCollisionDisplacement,
   getGraphCollisionVelocity,
@@ -12,6 +15,7 @@ import {
   graphLabelVisibilityChanged,
   getAuthorEdgeWidth,
   getAuthorMarkerRadius,
+  getViridisColor,
   normalizeGraphWheelDelta,
   renderCollectionCitationGraphWindow,
 } from "../src/modules/citationGraphWindow";
@@ -215,7 +219,7 @@ describe("citation graph settings and geometry", function () {
     assert.deepEqual(filterCitationsPerYearEdges(nodes, edges), [{ source: "a", target: "c" }]);
   });
 
-  it("aggregates recurring OpenAlex authors and weighted undirected coauthorships", function () {
+  it("aggregates all qualifying OpenAlex authors and weighted undirected coauthorships", function () {
     const graph = buildAuthorGraphData([
       {
         itemID: 1,
@@ -223,10 +227,10 @@ describe("citation graph settings and geometry", function () {
         label: "First publication",
         year: 2020,
         authors: [
-          { id: "A1", name: "Alice Author" },
-          { id: "A1", name: "Alice Author" },
-          { id: "A2", name: "Bob Author" },
-          { id: "A3", name: "Single Appearance" },
+          { id: "A1", name: "Alice Author", hIndex: 12 },
+          { id: "A1", name: "Alice Author", hIndex: 12 },
+          { id: "A2", name: "Bob Author", hIndex: 8 },
+          { id: "A3", name: "Single Appearance", hIndex: 6 },
         ],
       },
       {
@@ -235,8 +239,8 @@ describe("citation graph settings and geometry", function () {
         label: "Second publication",
         year: 2021,
         authors: [
-          { id: "A1", name: "Alicia Author" },
-          { id: "A2", name: "Bob Author" },
+          { id: "A1", name: "Alicia Author", hIndex: 12 },
+          { id: "A2", name: "Bob Author", hIndex: 8 },
         ],
       },
       {
@@ -245,8 +249,8 @@ describe("citation graph settings and geometry", function () {
         label: "Newest publication",
         year: 2022,
         authors: [
-          { id: "A1", name: "Alice Author" },
-          { id: "A4", name: "Another Single" },
+          { id: "A1", name: "Alice Author", hIndex: 12 },
+          { id: "A4", name: "Another Single", hIndex: 2 },
         ],
       },
       {
@@ -254,7 +258,7 @@ describe("citation graph settings and geometry", function () {
         workID: "W4",
         label: "Undated publication",
         year: null,
-        authors: [{ id: "A2", name: "Bob Author" }],
+        authors: [{ id: "A2", name: "Bob Author", hIndex: 8 }],
       },
     ]);
 
@@ -263,6 +267,7 @@ describe("citation graph settings and geometry", function () {
       [
         ["A1", "Alice Author", 3],
         ["A2", "Bob Author", 3],
+        ["A3", "Single Appearance", 1],
       ],
     );
     assert.deepEqual(
@@ -271,9 +276,147 @@ describe("citation graph settings and geometry", function () {
     );
     assert.deepEqual(
       graph.edges.map((edge) => [edge.source, edge.target, edge.sharedItemCount]),
-      [["A1", "A2", 2]],
+      [
+        ["A1", "A2", 2],
+        ["A1", "A3", 1],
+        ["A2", "A3", 1],
+      ],
     );
     assert.equal(graph.publicationCount, 4);
+    assert.equal(graph.omittedBelowHIndex, 1);
+    assert.equal(graph.omittedMissingHIndex, 0);
+  });
+
+  it("filters authors by an inclusive h-index threshold without requiring two works", function () {
+    const graph = buildAuthorGraphData(
+      [
+        {
+          itemID: 1,
+          workID: "W1",
+          label: "One",
+          year: 2020,
+          authors: [
+            { id: "A1", name: "At threshold", hIndex: 5 },
+            { id: "A2", name: "Below", hIndex: 4 },
+            { id: "A3", name: "Unknown", hIndex: null },
+          ],
+        },
+      ],
+      5,
+    );
+
+    assert.deepEqual(
+      graph.nodes.map((node) => node.id),
+      ["A1"],
+    );
+    assert.equal(graph.omittedBelowHIndex, 1);
+    assert.equal(graph.omittedMissingHIndex, 1);
+    assert.deepEqual(graph.edges, []);
+  });
+
+  it("independently excludes single-work authors and single-work clusters", function () {
+    const graph = buildAuthorGraphData(
+      [
+        {
+          itemID: 1,
+          workID: "W1",
+          label: "One-work cluster",
+          year: 2020,
+          authors: [
+            { id: "A1", name: "One A", hIndex: 10 },
+            { id: "A2", name: "One B", hIndex: 10 },
+          ],
+        },
+        {
+          itemID: 2,
+          workID: "W2",
+          label: "Connected work one",
+          year: 2021,
+          authors: [
+            { id: "A3", name: "Recurring", hIndex: 10 },
+            { id: "A4", name: "Leaf A", hIndex: 10 },
+          ],
+        },
+        {
+          itemID: 3,
+          workID: "W3",
+          label: "Connected work two",
+          year: 2022,
+          authors: [
+            { id: "A3", name: "Recurring", hIndex: 10 },
+            { id: "A5", name: "Leaf B", hIndex: 10 },
+          ],
+        },
+        {
+          itemID: 4,
+          workID: "W4",
+          label: "Isolated author",
+          year: 2023,
+          authors: [{ id: "A6", name: "Solo", hIndex: 10 }],
+        },
+      ],
+      0,
+    );
+
+    const withoutSingleWorkClusters = filterAuthorGraphData(graph, {
+      excludeSingleWorkClusters: true,
+    });
+    assert.deepEqual(
+      withoutSingleWorkClusters.nodes.map((node) => node.id),
+      ["A4", "A5", "A3"],
+    );
+    assert.equal(withoutSingleWorkClusters.edges.length, 2);
+    assert.equal(withoutSingleWorkClusters.publicationCount, 2);
+
+    const withoutSingleWorkAuthors = filterAuthorGraphData(graph, {
+      excludeSingleWorkAuthors: true,
+    });
+    assert.deepEqual(
+      withoutSingleWorkAuthors.nodes.map((node) => node.id),
+      ["A3"],
+    );
+    assert.deepEqual(withoutSingleWorkAuthors.edges, []);
+    assert.equal(withoutSingleWorkAuthors.publicationCount, 2);
+  });
+
+  it("uses an absolute capped Viridis color scale", function () {
+    assert.equal(getViridisColor(0), "rgb(68, 1, 84)");
+    assert.equal(getViridisColor(100), "rgb(253, 231, 37)");
+    assert.equal(getViridisColor(500), getViridisColor(100));
+    assert.notEqual(getViridisColor(50), getViridisColor(0));
+  });
+
+  it("groups affiliation institutions by year with deterministic ordering", function () {
+    assert.deepEqual(
+      buildAuthorAffiliationTimeline([
+        { institutionID: "I2", institutionName: "Zulu University", years: [2021, 2020] },
+        { institutionID: "I1", institutionName: "Alpha Institute", years: [2021] },
+        { institutionID: "I1", institutionName: "Alpha Institute", years: [2021] },
+      ]),
+      [
+        {
+          year: 2021,
+          institutions: [
+            { id: "I1", name: "Alpha Institute" },
+            { id: "I2", name: "Zulu University" },
+          ],
+        },
+        {
+          year: 2020,
+          institutions: [{ id: "I2", name: "Zulu University" }],
+        },
+      ],
+    );
+  });
+
+  it("compactly packs disconnected author groups without target overlap", function () {
+    const targets = buildAuthorComponentTargets([12, 4, 1], 220);
+
+    assert.deepEqual(targets[0], { x: 0, y: 0 });
+    assert.lengthOf(targets, 3);
+    assert.isAbove(Math.hypot(targets[1].x, targets[1].y), 300);
+    assert.isAbove(Math.hypot(targets[2].x - targets[1].x, targets[2].y - targets[1].y), 250);
+    assert.isBelow(Math.max(...targets.map((target) => Math.hypot(target.x, target.y))), 350);
   });
 
   it("uses monotonic bounded author marker and coauthorship edge scaling", function () {
@@ -312,15 +455,32 @@ describe("citation graph settings and geometry", function () {
     assert.include(html, 'id="yearly-view"');
     assert.include(html, 'id="authors-view"');
     assert.include(html, 'id="author-graph"');
+    assert.notInclude(html, 'id="author-components"');
     assert.include(html, 'class="author-details" id="author-details" aria-live="polite"></aside>');
     assert.include(html, 'lineEl.setAttribute("class", "edge author-edge")');
     assert.include(html, 'textEl.setAttribute("class", "node-label author-label")');
     assert.include(html, ".edge.author-edge");
     assert.include(html, ".edge.author-edge.hover-connected");
+    assert.notInclude(html, ".author-component-region");
+    assert.notInclude(html, 'addSummaryPill("Groups"');
+    assert.include(html, "node.componentTargetX - node.x");
+    assert.include(html, 'class="author-color-legend"');
+    assert.include(html, 'id="exclude-single-work-authors"');
+    assert.include(html, ">Exclude single-work authors</button>");
+    assert.include(html, 'id="exclude-single-work-clusters"');
+    assert.include(html, ">Exclude single-work clusters</button>");
+    assert.include(html, "filterAuthorGraphData(completeAuthorGraph");
+    assert.include(html, 'publicationsTitleEl.textContent = "Related publications"');
+    assert.include(html, 'affiliationTitleEl.textContent = "Institution history"');
+    assert.isBelow(
+      html.indexOf('publicationsTitleEl.textContent = "Related publications"'),
+      html.indexOf('affiliationTitleEl.textContent = "Institution history"'),
+    );
+    assert.include(html, 'hIndexEl.textContent = "h-index: " + node.hIndex');
     assert.include(html, 'node.circleEl.classList.toggle("hover-coauthor", isCoauthor)');
     assert.include(html, 'node.circleEl.addEventListener("mouseenter"');
     assert.include(html, "left.componentIndex !== right.componentIndex");
-    assert.include(html, "settings.charge * (separatesComponents ? 4 : 2)");
+    assert.include(html, "settings.charge * (separatesComponents ? 1.35 : 2)");
     assert.include(html, "Math.max(90, settings.linkDistance * 0.55)");
     assert.include(html, "Math.max(16, settings.collisionPadding)");
     assert.include(html, "if (!authorFittedAfterSettle)");

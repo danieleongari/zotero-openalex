@@ -4,6 +4,7 @@ const OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF = "extensions.zotero-openalex.autoUpd
 const OPENALEX_STALE_MONTHS_PREF = "extensions.zotero-openalex.staleMonths";
 const OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF =
   "extensions.zotero-openalex.showGraphTuningControls";
+const OPENALEX_MINIMUM_AUTHOR_H_INDEX_PREF = "extensions.zotero-openalex.minimumAuthorHIndex";
 const OPENALEX_TEST_WORK_PATH = "doi%3A10.7717%2Fpeerj.4375";
 let openAlexPaneInitialized = false;
 
@@ -29,6 +30,15 @@ function normalizeStaleMonths(value, fallback = 3) {
   return Math.max(1, Math.min(36, parsed));
 }
 
+function normalizeMinimumAuthorHIndex(value, fallback = 5) {
+  const parsed = Number.parseInt(String(value), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.max(0, Math.min(1000, parsed));
+}
+
 function setAPIStatus(message, isError = false) {
   const statusEl = document.getElementById("openalex-api-key-status");
   if (!statusEl) {
@@ -37,6 +47,75 @@ function setAPIStatus(message, isError = false) {
 
   statusEl.textContent = message || "";
   statusEl.style.color = isError ? "#b3261e" : "";
+}
+
+function setCacheStatus(message, isError = false) {
+  const statusEl = document.getElementById("openalex-cache-status");
+  if (!statusEl) {
+    return;
+  }
+
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#b3261e" : "";
+}
+
+function updateCacheCountElements(stats) {
+  const worksEl = document.getElementById("openalex-cache-works-count");
+  const authorsEl = document.getElementById("openalex-cache-authors-count");
+  if (worksEl) {
+    worksEl.textContent = `Works metadata: ${Number(stats?.works) || 0}`;
+  }
+  if (authorsEl) {
+    authorsEl.textContent = `Authors metadata: ${Number(stats?.authors) || 0}`;
+  }
+}
+
+function getOpenAlexBridge() {
+  return globalThis.OpenAlexWorkID || Zotero.OpenAlexAddon?.openAlexWorkID;
+}
+
+async function refreshMetadataCacheStats() {
+  const bridge = getOpenAlexBridge();
+  if (!bridge || typeof bridge.getMetadataCacheStats !== "function") {
+    setCacheStatus("Metadata cache is unavailable.", true);
+    return;
+  }
+
+  try {
+    updateCacheCountElements(await bridge.getMetadataCacheStats());
+  } catch (error) {
+    setCacheStatus(`Could not read metadata cache statistics: ${String(error)}`, true);
+  }
+}
+
+async function cleanMetadataCache(cleanBtn) {
+  const bridge = getOpenAlexBridge();
+  if (!bridge || typeof bridge.cleanMetadataCache !== "function") {
+    setCacheStatus("Metadata cache is unavailable.", true);
+    return;
+  }
+
+  const confirmed = window.confirm(
+    "Clean the OpenAlex metadata cache?\n\nWorks not referenced by current Zotero items and Authors without remaining Works will be deleted.",
+  );
+  if (!confirmed) {
+    return;
+  }
+
+  cleanBtn.disabled = true;
+  setCacheStatus("Checking current Zotero items and cleaning metadata cache…");
+  try {
+    const result = await bridge.cleanMetadataCache();
+    updateCacheCountElements(result?.after);
+    setCacheStatus(
+      `Cache cleaned: ${Number(result?.deletedWorks) || 0} Works and ${Number(result?.deletedAuthors) || 0} Authors removed.`,
+    );
+  } catch (error) {
+    setCacheStatus(`Metadata cache cleanup failed: ${String(error)}`, true);
+    await refreshMetadataCacheStats();
+  } finally {
+    cleanBtn.disabled = false;
+  }
 }
 
 function saveAPIKeyValue(inputEl) {
@@ -114,6 +193,8 @@ function initOpenAlexPreferencesPane() {
   const showGraphTuningControlsCheckbox = document.getElementById(
     "openalex-show-graph-tuning-controls",
   );
+  const minimumAuthorHIndexInput = document.getElementById("minimum-author-h-index");
+  const cacheCleanBtn = document.getElementById("openalex-cache-clean");
   const inputEl = document.getElementById("openalex-api-key-input");
   const clearBtn = document.getElementById("openalex-api-key-clear");
   const testBtn = document.getElementById("openalex-api-key-test");
@@ -122,6 +203,8 @@ function initOpenAlexPreferencesPane() {
     !staleMonthsInput ||
     !arxivCheckbox ||
     !showGraphTuningControlsCheckbox ||
+    !minimumAuthorHIndexInput ||
+    !cacheCleanBtn ||
     !inputEl ||
     !clearBtn ||
     !testBtn
@@ -146,6 +229,10 @@ function initOpenAlexPreferencesPane() {
   showGraphTuningControlsCheckbox.checked = getBooleanPrefValue(
     OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF,
     false,
+  );
+  const storedMinimumAuthorHIndex = Zotero.Prefs.get(OPENALEX_MINIMUM_AUTHOR_H_INDEX_PREF, true);
+  minimumAuthorHIndexInput.value = String(
+    normalizeMinimumAuthorHIndex(storedMinimumAuthorHIndex, 5),
   );
 
   autoUpdateCheckbox.addEventListener("command", () => {
@@ -175,6 +262,18 @@ function initOpenAlexPreferencesPane() {
       true,
     );
   });
+
+  const saveMinimumAuthorHIndex = () => {
+    const normalized = normalizeMinimumAuthorHIndex(minimumAuthorHIndexInput.value, 5);
+    minimumAuthorHIndexInput.value = String(normalized);
+    Zotero.Prefs.set(OPENALEX_MINIMUM_AUTHOR_H_INDEX_PREF, normalized, true);
+  };
+  minimumAuthorHIndexInput.addEventListener("change", saveMinimumAuthorHIndex);
+
+  cacheCleanBtn.addEventListener("command", () => {
+    void cleanMetadataCache(cacheCleanBtn);
+  });
+  void refreshMetadataCacheStats();
 
   const saveHandler = () => {
     saveAPIKeyValue(inputEl);

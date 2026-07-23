@@ -6,4 +6,5 @@ pref("extensions.zotero-openalex.requestDelayMs", 1000);
 pref("extensions.zotero-openalex.startupDelayMs", 3000);
 pref("extensions.zotero-openalex.showStartupSummary", true);
 pref("extensions.zotero-openalex.showGraphTuningControls", false);
+pref("extensions.zotero-openalex.minimumAuthorHIndex", 5);
 pref("extensions.zotero-openalex.apiKey", "");
