@@ -40,5 +40,36 @@
       id="openalex-show-graph-tuning-controls"
       label="Show graph tuning controls in the Citation Graph window"
     />
+
+    <h2>Co-Authors</h2>
+
+    <hbox align="center">
+      <label value="Minimum h-index shown in Co-Authors:" />
+      <html:input
+        id="minimum-author-h-index"
+        type="number"
+        min="0"
+        max="1000"
+        step="1"
+        style="width: 5em; max-width: 100%; margin-inline-start: 0.5em"
+      />
+    </hbox>
+    <description>
+      Authors below this value, or without cached h-index metadata, are hidden. Authors exactly at
+      the threshold remain visible. Set 0 to disable the numeric cutoff.
+    </description>
+
+    <h2>Metadata Cache</h2>
+
+    <description id="openalex-cache-works-count">Works metadata: Loading…</description>
+    <description id="openalex-cache-authors-count">Authors metadata: Loading…</description>
+    <hbox align="center">
+      <button id="openalex-cache-clean" label="Clean metadata cache…" />
+    </hbox>
+    <description>
+      Compares the cache with non-deleted items in your Zotero user and group libraries, then
+      removes unreferenced Works and Authors. This does not make network requests.
+    </description>
+    <description id="openalex-cache-status" style="min-height: 1.4em" />
   </groupbox>
 </vbox>
