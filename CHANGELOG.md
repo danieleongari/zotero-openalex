@@ -1,5 +1,12 @@
 # Changelog
 
+## [9.6.0](https://github.com/danieleongari/zotero-openalex/compare/v9.5.0...v9.6.0) (2026-07-23)
+
+
+### Features
+
+* enrich co-authors with author metadata ([#26](https://github.com/danieleongari/zotero-openalex/issues/26)) ([245e155](https://github.com/danieleongari/zotero-openalex/commit/245e1551cd17cd2127e6bcd984fcbfedd1e11811))
+
 ## [9.5.0](https://github.com/danieleongari/zotero-openalex/compare/v9.4.0...v9.5.0) (2026-07-22)
 
 
