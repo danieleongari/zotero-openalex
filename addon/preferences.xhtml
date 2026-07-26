@@ -41,6 +41,23 @@
       label="Overwrite article's URL with OpenAlex Work link (instead of linking in the right-click menu)"
     />
 
+    <hbox align="center">
+      <button id="openalex-restore-crossref-urls" label="Restore CrossRef URLs" />
+    </hbox>
+    <description>
+      Restores URLs for items whose URL is currently an OpenAlex Work page, using the primary URL
+      returned for the item's DOI by Crossref. Future OpenAlex updates can replace these URLs again
+      when URL overwriting is enabled.
+    </description>
+    <html:progress
+      id="openalex-restore-crossref-progress"
+      max="100"
+      value="0"
+      hidden="true"
+      style="width: 32em; max-width: 100%"
+    />
+    <description id="openalex-restore-crossref-status" style="min-height: 1.4em" />
+
     <checkbox
       id="openalex-show-graph-tuning-controls"
       label="Show graph tuning controls in the Citation Graph window"

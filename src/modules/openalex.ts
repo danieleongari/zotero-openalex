@@ -36,6 +36,8 @@ const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#]
 const ARXIV_ID_MODERN_PATTERN = /^\d{4}\.\d{4,5}$/;
 const ARXIV_ID_LEGACY_PATTERN = /^[a-z-]+(?:\.[a-z-]+)?\/\d{7}$/i;
 const ARXIV_DOI_PREFIX = "10.48550/arXiv.";
+const OPENALEX_WORK_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?openalex\.org\/works\/W\d+\/?(?:[?#].*)?$/i;
 const WORK_ID_LINE_PATTERN = /^openalex\.work_id:\s*(W\d+)\s*$/i;
 const CIT_COUNT_LINE_PATTERN = /^openalex\.cit_count:\s*(\d+)\s*$/i;
 const CIT_DATE_LINE_PATTERN = /^openalex\.cit_date:\s*(\d{4}-\d{1,2}-\d{1,2})\s*$/i;
@@ -50,6 +52,27 @@ interface OpenAlexMetadata {
 interface UpdateOutcome {
   status: "updated" | "unchanged" | "skipped";
   message?: string;
+}
+
+interface CrossrefURLRestoreProgress {
+  processedItems: number;
+  totalItems: number;
+  restoredItems: number;
+  failedItems: number;
+  message: string;
+}
+
+interface CrossrefURLRestoreResult {
+  eligibleItems: number;
+  restoredItems: number;
+  missingDOIItems: number;
+  unresolvedItems: number;
+  failedItems: number;
+}
+
+interface CrossrefURLLookupResult {
+  status: "resolved" | "unresolved" | "failed";
+  url: string | null;
 }
 
 interface OpenAlexWork extends OpenAlexWorkPayload {
@@ -600,6 +623,96 @@ class OpenAlexWorkIDClass {
       .map((item) => parseOpenAlexMetadata((item.getField("extra") as string) || "").workID)
       .filter((workID): workID is string => Boolean(workID));
     return openAlexStore.clean(validWorkIDs);
+  }
+
+  async restoreCrossrefURLs(
+    onProgress?: (progress: CrossrefURLRestoreProgress) => void,
+  ): Promise<CrossrefURLRestoreResult> {
+    const notify = (progress: CrossrefURLRestoreProgress) => {
+      if (!onProgress) return;
+      try {
+        onProgress(progress);
+      } catch (error) {
+        Zotero.debug("OpenAlex: failed updating Crossref URL restoration progress");
+        Zotero.debug(error);
+      }
+    };
+
+    notify({
+      processedItems: 0,
+      totalItems: 0,
+      restoredItems: 0,
+      failedItems: 0,
+      message: "Checking Zotero items…",
+    });
+
+    const allRegularItems = await getAllRegularItems();
+    const eligibleItems = allRegularItems.filter((item) =>
+      isOpenAlexWorkURL((item.getField("url") as string) || ""),
+    );
+    const result: CrossrefURLRestoreResult = {
+      eligibleItems: eligibleItems.length,
+      restoredItems: 0,
+      missingDOIItems: 0,
+      unresolvedItems: 0,
+      failedItems: 0,
+    };
+    const lookupCache = new Map<string, CrossrefURLLookupResult>();
+
+    notify({
+      processedItems: 0,
+      totalItems: eligibleItems.length,
+      restoredItems: 0,
+      failedItems: 0,
+      message: eligibleItems.length
+        ? `Restoring Crossref URLs for ${eligibleItems.length} items…`
+        : "No items with OpenAlex Work URLs were found.",
+    });
+
+    for (let index = 0; index < eligibleItems.length; index++) {
+      const item = eligibleItems[index];
+      const extra = ((item.getField("extra") as string) || "").toString();
+      const doi = extractDOIForLookup(item, extra);
+
+      if (!doi) {
+        result.missingDOIItems++;
+      } else {
+        let lookup = lookupCache.get(doi);
+        if (!lookup) {
+          lookup = await fetchCrossrefPrimaryURL(doi);
+          lookupCache.set(doi, lookup);
+        }
+
+        if (lookup.status === "resolved" && lookup.url) {
+          const originalURL = ((item.getField("url") as string) || "").toString();
+          try {
+            item.setField("url", lookup.url);
+            await item.saveTx();
+            result.restoredItems++;
+          } catch (error) {
+            item.setField("url", originalURL);
+            result.failedItems++;
+            Zotero.debug(`OpenAlex: failed restoring Crossref URL for item ${item.id}`);
+            Zotero.debug(error);
+          }
+        } else if (lookup.status === "unresolved") {
+          result.unresolvedItems++;
+        } else {
+          result.failedItems++;
+        }
+      }
+
+      const processedItems = index + 1;
+      notify({
+        processedItems,
+        totalItems: eligibleItems.length,
+        restoredItems: result.restoredItems,
+        failedItems: result.failedItems,
+        message: `Processed ${processedItems} of ${eligibleItems.length} items; ${result.restoredItems} URLs restored.`,
+      });
+    }
+
+    return result;
   }
 
   async main() {
@@ -1689,6 +1802,18 @@ function normalizeDOI(value: string | undefined) {
   return match ? match[0].toLowerCase() : null;
 }
 
+function isOpenAlexWorkURL(value: string | undefined) {
+  return OPENALEX_WORK_URL_PATTERN.test(String(value || "").trim());
+}
+
+function extractCrossrefPrimaryURL(payload: unknown) {
+  const rawURL = (payload as any)?.message?.items?.[0]?.resource?.primary?.URL;
+  if (typeof rawURL !== "string") return null;
+
+  const url = rawURL.trim();
+  return /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
 function extractArXivIDFromURL(urlValue: string | undefined) {
   if (!urlValue) return null;
 
@@ -1987,6 +2112,43 @@ async function fetchOpenAlexAuthorsByIDs(authorIDs: Iterable<string>) {
   return Array.isArray(response?.results) ? (response.results as OpenAlexAuthor[]) : [];
 }
 
+async function fetchCrossrefPrimaryURL(doi: string): Promise<CrossrefURLLookupResult> {
+  const normalizedDOI = normalizeDOI(doi);
+  if (!normalizedDOI) {
+    return { status: "unresolved", url: null };
+  }
+
+  const params = new URLSearchParams({
+    filter: `doi:${normalizedDOI}`,
+  });
+  const url = `https://api.crossref.org/works/?${params.toString()}`;
+
+  try {
+    const xhr = await Zotero.HTTP.request("GET", url, {
+      headers: { Accept: "application/json" },
+      timeout: 15000,
+      successCodes: false,
+      errorDelayIntervals: [1000, 2000],
+      errorDelayMax: 5000,
+    });
+    const status = Number(xhr?.status) || 0;
+    if (status < 200 || status >= 300) {
+      Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status}.`);
+      return { status: "failed", url: null };
+    }
+
+    const payload = JSON.parse(String(xhr.responseText || ""));
+    const primaryURL = extractCrossrefPrimaryURL(payload);
+    return primaryURL
+      ? { status: "resolved", url: primaryURL }
+      : { status: "unresolved", url: null };
+  } catch (error) {
+    Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI}`);
+    Zotero.debug(error);
+    return { status: "failed", url: null };
+  }
+}
+
 function buildOpenAlexAuthorIDBatches(authorIDs: Iterable<string>) {
   const normalizedIDs = [
     ...new Set(
@@ -2231,4 +2393,6 @@ export const __test__ = {
   normalizeAuthorAffiliations,
   normalizeOpenAlexAuthorID,
   buildOpenAlexAuthorIDBatches,
+  isOpenAlexWorkURL,
+  extractCrossrefPrimaryURL,
 };

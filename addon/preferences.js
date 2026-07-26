@@ -60,6 +60,71 @@ function setCacheStatus(message, isError = false) {
   statusEl.style.color = isError ? "#b3261e" : "";
 }
 
+function setCrossrefRestoreStatus(message, isError = false) {
+  const statusEl = document.getElementById("openalex-restore-crossref-status");
+  if (!statusEl) {
+    return;
+  }
+
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#b3261e" : "";
+}
+
+function updateCrossrefRestoreProgress(progressEl, progress) {
+  const totalItems = Number(progress?.totalItems) || 0;
+  const processedItems = Number(progress?.processedItems) || 0;
+  progressEl.hidden = false;
+
+  if (totalItems > 0) {
+    progressEl.value = Math.max(0, Math.min(100, Math.round((processedItems / totalItems) * 100)));
+  } else {
+    progressEl.removeAttribute("value");
+  }
+
+  setCrossrefRestoreStatus(progress?.message || "Checking Zotero items…");
+}
+
+async function restoreCrossrefURLs(restoreBtn, progressEl) {
+  const bridge = getOpenAlexBridge();
+  if (!bridge || typeof bridge.restoreCrossrefURLs !== "function") {
+    setCrossrefRestoreStatus("Crossref URL restoration is unavailable.", true);
+    return;
+  }
+
+  restoreBtn.disabled = true;
+  progressEl.hidden = false;
+  progressEl.removeAttribute("value");
+  setCrossrefRestoreStatus("Checking Zotero items…");
+
+  try {
+    const result = await bridge.restoreCrossrefURLs((progress) => {
+      updateCrossrefRestoreProgress(progressEl, progress);
+    });
+
+    progressEl.value = 100;
+    const eligibleItems = Number(result?.eligibleItems) || 0;
+    const restoredItems = Number(result?.restoredItems) || 0;
+    const missingDOIItems = Number(result?.missingDOIItems) || 0;
+    const unresolvedItems = Number(result?.unresolvedItems) || 0;
+    const failedItems = Number(result?.failedItems) || 0;
+
+    if (!eligibleItems) {
+      setCrossrefRestoreStatus("No items with OpenAlex Work URLs were found.");
+      return;
+    }
+
+    setCrossrefRestoreStatus(
+      `Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed.`,
+      failedItems > 0,
+    );
+  } catch (error) {
+    progressEl.value = 0;
+    setCrossrefRestoreStatus(`Crossref URL restoration failed: ${String(error)}`, true);
+  } finally {
+    restoreBtn.disabled = false;
+  }
+}
+
 function updateCacheCountElements(stats) {
   const worksEl = document.getElementById("openalex-cache-works-count");
   const authorsEl = document.getElementById("openalex-cache-authors-count");
@@ -192,6 +257,8 @@ function initOpenAlexPreferencesPane() {
   const staleMonthsInput = document.getElementById("stale-months");
   const arxivCheckbox = document.getElementById("openalex-correct-arxiv");
   const overwriteArticleURLCheckbox = document.getElementById("openalex-overwrite-article-url");
+  const restoreCrossrefURLsBtn = document.getElementById("openalex-restore-crossref-urls");
+  const restoreCrossrefProgress = document.getElementById("openalex-restore-crossref-progress");
   const showGraphTuningControlsCheckbox = document.getElementById(
     "openalex-show-graph-tuning-controls",
   );
@@ -205,6 +272,8 @@ function initOpenAlexPreferencesPane() {
     !staleMonthsInput ||
     !arxivCheckbox ||
     !overwriteArticleURLCheckbox ||
+    !restoreCrossrefURLsBtn ||
+    !restoreCrossrefProgress ||
     !showGraphTuningControlsCheckbox ||
     !minimumAuthorHIndexInput ||
     !cacheCleanBtn ||
@@ -268,6 +337,10 @@ function initOpenAlexPreferencesPane() {
       Boolean(overwriteArticleURLCheckbox.checked),
       true,
     );
+  });
+
+  restoreCrossrefURLsBtn.addEventListener("command", () => {
+    void restoreCrossrefURLs(restoreCrossrefURLsBtn, restoreCrossrefProgress);
   });
 
   showGraphTuningControlsCheckbox.addEventListener("command", () => {

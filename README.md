@@ -71,6 +71,11 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `minimumAuthorHIndex` (default `5`): hide authors whose cached h-index is below this
   inclusive threshold. Authors without h-index metadata are also hidden.
 
+`Restore CrossRef URLs` scans non-deleted regular items in user and group libraries whose URL is an
+OpenAlex Work page. For each item with a DOI, it restores the primary resource URL returned by
+Crossref—the same URL field used by Zotero's Crossref translator—and shows live progress plus a
+completion summary. Items without a DOI or Crossref primary URL are left unchanged.
+
 The Metadata Cache section shows the number of cached Works and Authors. Its cleanup action compares
 the database with non-deleted items in all user and group libraries, removes Works no longer present
 in Zotero, and then removes Authors with no remaining related Works. Cleanup is local-only and makes

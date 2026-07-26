@@ -241,4 +241,36 @@ describe("OpenAlex SQLite store", function () {
     assert.equal(batches[0][0], "A1");
     assert.equal(batches[2][4], "A205");
   });
+
+  it("recognizes only OpenAlex Work page URLs as restoration candidates", function () {
+    assert.isTrue(openAlexTest.isOpenAlexWorkURL("https://openalex.org/works/W123"));
+    assert.isTrue(openAlexTest.isOpenAlexWorkURL("https://www.openalex.org/works/w456/"));
+    assert.isFalse(openAlexTest.isOpenAlexWorkURL("https://openalex.org/authors/A123"));
+    assert.isFalse(openAlexTest.isOpenAlexWorkURL("https://example.com/works/W123"));
+  });
+
+  it("uses the same Crossref primary resource URL as Zotero's Crossref translator", function () {
+    assert.equal(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: {
+          items: [
+            {
+              URL: "https://doi.org/10.1234/example",
+              resource: {
+                primary: {
+                  URL: "https://publisher.example/article",
+                },
+              },
+            },
+          ],
+        },
+      }),
+      "https://publisher.example/article",
+    );
+    assert.isNull(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: { items: [{ URL: "https://doi.org/10.1234/example" }] },
+      }),
+    );
+  });
 });
