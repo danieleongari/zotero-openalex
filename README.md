@@ -18,11 +18,13 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 
 > ⚠️ **New behavior since v9.7.0**
 > ---
-> By default, the plugin preserves the existing URL metadata of your items. 
-> Use `Go to OpenAlex Work page` in the item context menu to open the stored Work. 
-> URL replacement can be enabled in the plugin settings if preferred. 
-> For those who want to restore the original Crossref URLs for items whose URL was replaced by an OpenAlex Work page, 
-> use the `Restore Crossref URLs` button in the plugin settings. 
+>
+> By default, the plugin preserves the existing URL metadata of your items.
+> Use `Go to OpenAlex Work page` in the item context menu to open the stored Work.
+> URL replacement can be enabled in the plugin settings if preferred.
+> For those who want to restore the original Crossref URLs for items whose URL
+> was replaced by an OpenAlex Work page,
+> use the `Restore Crossref URLs` button in the plugin settings.
 
 ## Installation
 
