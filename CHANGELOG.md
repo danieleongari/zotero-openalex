@@ -1,5 +1,17 @@
 # Changelog
 
+## [9.7.0](https://github.com/danieleongari/zotero-openalex/compare/v9.6.0...v9.7.0) (2026-07-26)
+
+
+### Features
+
+* preserve article URLs by default and add OpenAlex link action ([#30](https://github.com/danieleongari/zotero-openalex/issues/30)) ([af8b989](https://github.com/danieleongari/zotero-openalex/commit/af8b98919764d25bac5a7456e038396b0b9f568c))
+
+
+### Bug Fixes
+
+* run title check for release PRs ([#32](https://github.com/danieleongari/zotero-openalex/issues/32)) ([cb7e2e5](https://github.com/danieleongari/zotero-openalex/commit/cb7e2e5071a811cd91c7d141faca0c20cbba44bd))
+
 ## [9.6.0](https://github.com/danieleongari/zotero-openalex/compare/v9.5.0...v9.6.0) (2026-07-23)
 
 
