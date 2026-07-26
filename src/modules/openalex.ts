@@ -30,6 +30,10 @@ const OPENALEX_OVERWRITE_ARTICLE_URL_PREF = "overwriteArticleURL";
 const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
 const MINIMUM_AUTHOR_H_INDEX_PREF = "minimumAuthorHIndex";
 const OPENALEX_AUTHOR_BATCH_SIZE = 100;
+const CROSSREF_REQUEST_INTERVAL_MS = 250;
+const CROSSREF_MAX_ATTEMPTS = 4;
+const CROSSREF_RETRY_BASE_DELAY_MS = 2000;
+const CROSSREF_RETRY_MAX_DELAY_MS = 10000;
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i;
 const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
@@ -68,11 +72,22 @@ interface CrossrefURLRestoreResult {
   missingDOIItems: number;
   unresolvedItems: number;
   failedItems: number;
+  rateLimitedItems: number;
+  lookupFailedItems: number;
+  saveFailedItems: number;
 }
 
 interface CrossrefURLLookupResult {
   status: "resolved" | "unresolved" | "failed";
   url: string | null;
+  failureReason?: "rate-limited" | "request";
+}
+
+interface CrossrefRetryProgress {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: "rate-limited" | "request";
 }
 
 interface OpenAlexWork extends OpenAlexWorkPayload {
@@ -149,6 +164,7 @@ let citationColumnRegistrationToken: string | null = null;
 let startupInfoWindow: any = null;
 let startupInfoUsesLineAPI = false;
 let openAlexLastErrorMessage = "";
+let crossrefNextRequestAt = 0;
 const openAlexStore = new OpenAlexStore();
 
 class OpenAlexWorkIDClass {
@@ -656,6 +672,9 @@ class OpenAlexWorkIDClass {
       missingDOIItems: 0,
       unresolvedItems: 0,
       failedItems: 0,
+      rateLimitedItems: 0,
+      lookupFailedItems: 0,
+      saveFailedItems: 0,
     };
     const lookupCache = new Map<string, CrossrefURLLookupResult>();
 
@@ -679,7 +698,19 @@ class OpenAlexWorkIDClass {
       } else {
         let lookup = lookupCache.get(doi);
         if (!lookup) {
-          lookup = await fetchCrossrefPrimaryURL(doi);
+          lookup = await fetchCrossrefPrimaryURL(doi, (retry) => {
+            const reason =
+              retry.reason === "rate-limited"
+                ? "Crossref rate limit reached"
+                : "Crossref request failed";
+            notify({
+              processedItems: index,
+              totalItems: eligibleItems.length,
+              restoredItems: result.restoredItems,
+              failedItems: result.failedItems,
+              message: `${reason}; waiting ${formatWaitSeconds(retry.delayMs)} before retry ${retry.attempt} of ${retry.maxAttempts}…`,
+            });
+          });
           lookupCache.set(doi, lookup);
         }
 
@@ -692,6 +723,7 @@ class OpenAlexWorkIDClass {
           } catch (error) {
             item.setField("url", originalURL);
             result.failedItems++;
+            result.saveFailedItems++;
             Zotero.debug(`OpenAlex: failed restoring Crossref URL for item ${item.id}`);
             Zotero.debug(error);
           }
@@ -699,6 +731,11 @@ class OpenAlexWorkIDClass {
           result.unresolvedItems++;
         } else {
           result.failedItems++;
+          if (lookup.failureReason === "rate-limited") {
+            result.rateLimitedItems++;
+          } else {
+            result.lookupFailedItems++;
+          }
         }
       }
 
@@ -1807,11 +1844,31 @@ function isOpenAlexWorkURL(value: string | undefined) {
 }
 
 function extractCrossrefPrimaryURL(payload: unknown) {
-  const rawURL = (payload as any)?.message?.items?.[0]?.resource?.primary?.URL;
+  const message = (payload as any)?.message;
+  const work = Array.isArray(message?.items) ? message.items[0] : message;
+  const rawURL = work?.resource?.primary?.URL;
   if (typeof rawURL !== "string") return null;
 
   const url = rawURL.trim();
   return /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
+function parseRetryAfterMilliseconds(value: string | null | undefined, now = Date.now()) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  const retryAt = Date.parse(trimmed);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : null;
+}
+
+function formatWaitSeconds(milliseconds: number) {
+  const seconds = Math.max(1, Math.ceil(milliseconds / 1000));
+  return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
 }
 
 function extractArXivIDFromURL(urlValue: string | undefined) {
@@ -2112,41 +2169,105 @@ async function fetchOpenAlexAuthorsByIDs(authorIDs: Iterable<string>) {
   return Array.isArray(response?.results) ? (response.results as OpenAlexAuthor[]) : [];
 }
 
-async function fetchCrossrefPrimaryURL(doi: string): Promise<CrossrefURLLookupResult> {
+async function waitForCrossrefRequestSlot() {
+  const now = Date.now();
+  const scheduledAt = Math.max(now, crossrefNextRequestAt);
+  crossrefNextRequestAt = scheduledAt + CROSSREF_REQUEST_INTERVAL_MS;
+  const waitMs = scheduledAt - now;
+  if (waitMs > 0) {
+    await delay(waitMs);
+  }
+}
+
+async function fetchCrossrefPrimaryURL(
+  doi: string,
+  onRetry?: (progress: CrossrefRetryProgress) => void,
+): Promise<CrossrefURLLookupResult> {
   const normalizedDOI = normalizeDOI(doi);
   if (!normalizedDOI) {
     return { status: "unresolved", url: null };
   }
 
-  const params = new URLSearchParams({
-    filter: `doi:${normalizedDOI}`,
-  });
-  const url = `https://api.crossref.org/works/?${params.toString()}`;
+  const url = `https://api.crossref.org/works/${encodeURIComponent(normalizedDOI)}`;
 
-  try {
-    const xhr = await Zotero.HTTP.request("GET", url, {
-      headers: { Accept: "application/json" },
-      timeout: 15000,
-      successCodes: false,
-      errorDelayIntervals: [1000, 2000],
-      errorDelayMax: 5000,
-    });
-    const status = Number(xhr?.status) || 0;
-    if (status < 200 || status >= 300) {
-      Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status}.`);
-      return { status: "failed", url: null };
+  for (let attempt = 1; attempt <= CROSSREF_MAX_ATTEMPTS; attempt++) {
+    await waitForCrossrefRequestSlot();
+
+    let xhr: XMLHttpRequest;
+    try {
+      xhr = await Zotero.HTTP.request("GET", url, {
+        headers: { Accept: "application/json" },
+        timeout: 15000,
+        successCodes: false,
+      });
+    } catch (error) {
+      Zotero.debug(`OpenAlex: Crossref request failed for ${normalizedDOI}`);
+      Zotero.debug(error);
+      if (attempt === CROSSREF_MAX_ATTEMPTS) {
+        return { status: "failed", url: null, failureReason: "request" };
+      }
+
+      const delayMs = Math.min(
+        CROSSREF_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+        CROSSREF_RETRY_MAX_DELAY_MS,
+      );
+      onRetry?.({
+        attempt: attempt + 1,
+        maxAttempts: CROSSREF_MAX_ATTEMPTS,
+        delayMs,
+        reason: "request",
+      });
+      await delay(delayMs);
+      continue;
     }
 
-    const payload = JSON.parse(String(xhr.responseText || ""));
-    const primaryURL = extractCrossrefPrimaryURL(payload);
-    return primaryURL
-      ? { status: "resolved", url: primaryURL }
-      : { status: "unresolved", url: null };
-  } catch (error) {
-    Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI}`);
-    Zotero.debug(error);
-    return { status: "failed", url: null };
+    const status = Number(xhr.status) || 0;
+    if (status === 404) {
+      return { status: "unresolved", url: null };
+    }
+
+    if (status === 429 || status >= 500) {
+      if (attempt === CROSSREF_MAX_ATTEMPTS) {
+        const failureReason = status === 429 ? "rate-limited" : "request";
+        Zotero.debug(
+          `OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status} after ${attempt} attempts.`,
+        );
+        return { status: "failed", url: null, failureReason };
+      }
+
+      const retryAfterMs = parseRetryAfterMilliseconds(xhr.getResponseHeader("Retry-After"));
+      const delayMs =
+        retryAfterMs ??
+        Math.min(CROSSREF_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), CROSSREF_RETRY_MAX_DELAY_MS);
+      onRetry?.({
+        attempt: attempt + 1,
+        maxAttempts: CROSSREF_MAX_ATTEMPTS,
+        delayMs,
+        reason: status === 429 ? "rate-limited" : "request",
+      });
+      await delay(delayMs);
+      continue;
+    }
+
+    if (status < 200 || status >= 300) {
+      Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status}.`);
+      return { status: "failed", url: null, failureReason: "request" };
+    }
+
+    try {
+      const payload = JSON.parse(String(xhr.responseText || ""));
+      const primaryURL = extractCrossrefPrimaryURL(payload);
+      return primaryURL
+        ? { status: "resolved", url: primaryURL }
+        : { status: "unresolved", url: null };
+    } catch (error) {
+      Zotero.debug(`OpenAlex: invalid Crossref response for ${normalizedDOI}`);
+      Zotero.debug(error);
+      return { status: "failed", url: null, failureReason: "request" };
+    }
   }
+
+  return { status: "failed", url: null, failureReason: "request" };
 }
 
 function buildOpenAlexAuthorIDBatches(authorIDs: Iterable<string>) {
@@ -2395,4 +2516,6 @@ export const __test__ = {
   buildOpenAlexAuthorIDBatches,
   isOpenAlexWorkURL,
   extractCrossrefPrimaryURL,
+  parseRetryAfterMilliseconds,
+  formatWaitSeconds,
 };

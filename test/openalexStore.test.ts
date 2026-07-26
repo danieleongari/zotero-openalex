@@ -267,10 +267,34 @@ describe("OpenAlex SQLite store", function () {
       }),
       "https://publisher.example/article",
     );
+    assert.equal(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: {
+          DOI: "10.1234/example",
+          resource: {
+            primary: {
+              URL: "https://publisher.example/single-record",
+            },
+          },
+        },
+      }),
+      "https://publisher.example/single-record",
+    );
     assert.isNull(
       openAlexTest.extractCrossrefPrimaryURL({
         message: { items: [{ URL: "https://doi.org/10.1234/example" }] },
       }),
     );
+  });
+
+  it("parses Crossref Retry-After values and formats visible waits", function () {
+    assert.equal(openAlexTest.parseRetryAfterMilliseconds("2"), 2000);
+    assert.equal(
+      openAlexTest.parseRetryAfterMilliseconds("Wed, 21 Oct 2015 07:28:02 GMT", 1445412480000),
+      2000,
+    );
+    assert.isNull(openAlexTest.parseRetryAfterMilliseconds("not-a-delay"));
+    assert.equal(openAlexTest.formatWaitSeconds(250), "1 second");
+    assert.equal(openAlexTest.formatWaitSeconds(2100), "3 seconds");
   });
 });

@@ -107,6 +107,9 @@ async function restoreCrossrefURLs(restoreBtn, progressEl) {
     const missingDOIItems = Number(result?.missingDOIItems) || 0;
     const unresolvedItems = Number(result?.unresolvedItems) || 0;
     const failedItems = Number(result?.failedItems) || 0;
+    const rateLimitedItems = Number(result?.rateLimitedItems) || 0;
+    const lookupFailedItems = Number(result?.lookupFailedItems) || 0;
+    const saveFailedItems = Number(result?.saveFailedItems) || 0;
 
     if (!eligibleItems) {
       setCrossrefRestoreStatus("No items with OpenAlex Work URLs were found.");
@@ -114,7 +117,7 @@ async function restoreCrossrefURLs(restoreBtn, progressEl) {
     }
 
     setCrossrefRestoreStatus(
-      `Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed.`,
+      `Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed (${rateLimitedItems} still rate-limited, ${lookupFailedItems} lookup, ${saveFailedItems} save).`,
       failedItems > 0,
     );
   } catch (error) {

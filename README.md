@@ -74,7 +74,9 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 `Restore CrossRef URLs` scans non-deleted regular items in user and group libraries whose URL is an
 OpenAlex Work page. For each item with a DOI, it restores the primary resource URL returned by
 Crossref—the same URL field used by Zotero's Crossref translator—and shows live progress plus a
-completion summary. Items without a DOI or Crossref primary URL are left unchanged.
+completion summary. Crossref requests use its single-record endpoint, are paced below the public
+rate limit, and retry temporary failures with backoff. Items without a DOI or Crossref primary URL
+are left unchanged.
 
 The Metadata Cache section shows the number of cached Works and Authors. Its cleanup action compares
 the database with non-deleted items in all user and group libraries, removes Works no longer present
