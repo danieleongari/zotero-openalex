@@ -21,6 +21,7 @@ const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
+const ITEM_MENU_SEPARATOR_ID = "openalex-item-menu-separator";
 const GO_TO_OPENALEX_WORK_MENU_ID = "openalex-go-to-work-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
@@ -156,6 +157,10 @@ class OpenAlexWorkIDClass {
 
     this.removeFromWindow(window);
 
+    const itemMenuSeparator = doc.createXULElement("menuseparator");
+    itemMenuSeparator.setAttribute("id", ITEM_MENU_SEPARATOR_ID);
+    itemMenuPopup.appendChild(itemMenuSeparator);
+
     const menuItem = doc.createXULElement("menuitem");
     menuItem.setAttribute("label", "Get OpenAlex-WorkID");
     menuItem.setAttribute("id", "workid-menuitem");
@@ -202,6 +207,7 @@ class OpenAlexWorkIDClass {
         }
       });
       (menuItem as any).hidden = !hasEligibleParentSelection;
+      (itemMenuSeparator as any).hidden = !hasEligibleParentSelection;
 
       const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null;
       const selectedWorkID =
@@ -289,6 +295,8 @@ class OpenAlexWorkIDClass {
     if (menuItem) {
       menuItem.remove();
     }
+
+    doc.getElementById(ITEM_MENU_SEPARATOR_ID)?.remove();
 
     const goToWorkMenuItem = doc.getElementById(GO_TO_OPENALEX_WORK_MENU_ID);
     if (goToWorkMenuItem && cleanup?.onGoToWorkCommand) {
