@@ -1,5 +1,6 @@
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "extensions.zotero-openalex.correctArxivArticles";
+const OPENALEX_OVERWRITE_ARTICLE_URL_PREF = "extensions.zotero-openalex.overwriteArticleURL";
 const OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF = "extensions.zotero-openalex.autoUpdateOnStartup";
 const OPENALEX_STALE_MONTHS_PREF = "extensions.zotero-openalex.staleMonths";
 const OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF =
@@ -190,6 +191,7 @@ function initOpenAlexPreferencesPane() {
   const autoUpdateCheckbox = document.getElementById("auto-update-on-startup");
   const staleMonthsInput = document.getElementById("stale-months");
   const arxivCheckbox = document.getElementById("openalex-correct-arxiv");
+  const overwriteArticleURLCheckbox = document.getElementById("openalex-overwrite-article-url");
   const showGraphTuningControlsCheckbox = document.getElementById(
     "openalex-show-graph-tuning-controls",
   );
@@ -202,6 +204,7 @@ function initOpenAlexPreferencesPane() {
     !autoUpdateCheckbox ||
     !staleMonthsInput ||
     !arxivCheckbox ||
+    !overwriteArticleURLCheckbox ||
     !showGraphTuningControlsCheckbox ||
     !minimumAuthorHIndexInput ||
     !cacheCleanBtn ||
@@ -222,7 +225,11 @@ function initOpenAlexPreferencesPane() {
   const storedStaleMonthsValue = Zotero.Prefs.get(OPENALEX_STALE_MONTHS_PREF, true);
   staleMonthsInput.value = String(normalizeStaleMonths(storedStaleMonthsValue, 3));
 
-  arxivCheckbox.checked = getBooleanPrefValue(OPENALEX_CORRECT_ARXIV_PREF, true);
+  arxivCheckbox.checked = getBooleanPrefValue(OPENALEX_CORRECT_ARXIV_PREF, false);
+  overwriteArticleURLCheckbox.checked = getBooleanPrefValue(
+    OPENALEX_OVERWRITE_ARTICLE_URL_PREF,
+    false,
+  );
 
   const storedValue = Zotero.Prefs.get("extensions.zotero-openalex.apiKey", true) || "";
   inputEl.value = storedValue;
@@ -253,6 +260,14 @@ function initOpenAlexPreferencesPane() {
 
   arxivCheckbox.addEventListener("command", () => {
     Zotero.Prefs.set(OPENALEX_CORRECT_ARXIV_PREF, Boolean(arxivCheckbox.checked), true);
+  });
+
+  overwriteArticleURLCheckbox.addEventListener("command", () => {
+    Zotero.Prefs.set(
+      OPENALEX_OVERWRITE_ARTICLE_URL_PREF,
+      Boolean(overwriteArticleURLCheckbox.checked),
+      true,
+    );
   });
 
   showGraphTuningControlsCheckbox.addEventListener("command", () => {

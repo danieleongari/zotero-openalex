@@ -21,8 +21,10 @@ const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
+const GO_TO_OPENALEX_WORK_MENU_ID = "openalex-go-to-work-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
+const OPENALEX_OVERWRITE_ARTICLE_URL_PREF = "overwriteArticleURL";
 const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
 const MINIMUM_AUTHOR_H_INDEX_PREF = "minimumAuthorHIndex";
 const OPENALEX_AUTHOR_BATCH_SIZE = 100;
@@ -133,6 +135,7 @@ class OpenAlexWorkIDClass {
     {
       onItemPopupShowing?: () => void;
       onItemCommand?: () => void;
+      onGoToWorkCommand?: () => void;
       onCollectionPopupShowing?: () => void;
       onCollectionCommand?: () => void;
       onSyncCommand?: () => void;
@@ -169,6 +172,25 @@ class OpenAlexWorkIDClass {
 
     itemMenuPopup.appendChild(menuItem);
 
+    const goToWorkMenuItem = doc.createXULElement("menuitem");
+    goToWorkMenuItem.setAttribute("label", "Go to OpenAlex Work page");
+    goToWorkMenuItem.setAttribute("id", GO_TO_OPENALEX_WORK_MENU_ID);
+    const onGoToWorkCommand = () => {
+      const selectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
+      const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null;
+      const workID = selectedItem
+        ? parseOpenAlexMetadata((selectedItem.getField("extra") as string) || "").workID
+        : null;
+      if (!workID) {
+        window.alert("No OpenAlex Work ID found for the selected item.");
+        return;
+      }
+
+      Zotero.launchURL(`https://openalex.org/works/${workID}`);
+    };
+    goToWorkMenuItem.addEventListener("command", onGoToWorkCommand);
+    itemMenuPopup.appendChild(goToWorkMenuItem);
+
     const onItemPopupShowing = () => {
       const pane = Zotero.getActiveZoteroPane();
       const selectedItems = pane ? pane.getSelectedItems() : [];
@@ -180,6 +202,14 @@ class OpenAlexWorkIDClass {
         }
       });
       (menuItem as any).hidden = !hasEligibleParentSelection;
+
+      const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null;
+      const selectedWorkID =
+        selectedItem && selectedItem.isRegularItem() && selectedItem.isTopLevelItem()
+          ? parseOpenAlexMetadata((selectedItem.getField("extra") as string) || "").workID
+          : null;
+      const overwriteArticleURL = getBooleanPref(OPENALEX_OVERWRITE_ARTICLE_URL_PREF, false);
+      (goToWorkMenuItem as any).hidden = overwriteArticleURL || !selectedWorkID;
     };
     itemMenuPopup.addEventListener("popupshowing", onItemPopupShowing);
 
@@ -209,6 +239,7 @@ class OpenAlexWorkIDClass {
       this.windowCleanup.set(window, {
         onItemPopupShowing,
         onItemCommand,
+        onGoToWorkCommand,
         onCollectionPopupShowing,
         onCollectionCommand,
         onSyncCommand: this.addToolsSyncMenu(window),
@@ -219,6 +250,7 @@ class OpenAlexWorkIDClass {
     this.windowCleanup.set(window, {
       onItemPopupShowing,
       onItemCommand,
+      onGoToWorkCommand,
       onSyncCommand: this.addToolsSyncMenu(window),
     });
   }
@@ -256,6 +288,14 @@ class OpenAlexWorkIDClass {
 
     if (menuItem) {
       menuItem.remove();
+    }
+
+    const goToWorkMenuItem = doc.getElementById(GO_TO_OPENALEX_WORK_MENU_ID);
+    if (goToWorkMenuItem && cleanup?.onGoToWorkCommand) {
+      goToWorkMenuItem.removeEventListener("command", cleanup.onGoToWorkCommand);
+    }
+    if (goToWorkMenuItem) {
+      goToWorkMenuItem.remove();
     }
 
     const collectionMenuPopup = getCollectionMenuPopup(doc);
@@ -732,6 +772,7 @@ async function synchronizeItemsWithWork(
   const fetchedAt = syncedAt.toISOString();
   const citationCount = normalizeCitationCount(apiWork.cited_by_count);
   const openAlexURL = `https://openalex.org/works/${workID}`;
+  const overwriteArticleURL = getBooleanPref(OPENALEX_OVERWRITE_ARTICLE_URL_PREF, false);
   const snapshots = items.map((item) => ({
     item,
     extra: ((item.getField("extra") as string) || "").toString(),
@@ -751,7 +792,7 @@ async function synchronizeItemsWithWork(
           citationDate: syncedAt,
         });
         const extraChanged = updatedExtra !== snapshot.extra;
-        const urlChanged = snapshot.url !== openAlexURL;
+        const urlChanged = overwriteArticleURL && snapshot.url !== openAlexURL;
         if (!extraChanged && !urlChanged && !forceSaveItemIDs.has(snapshot.item.id)) continue;
 
         if (extraChanged) snapshot.item.setField("extra", updatedExtra);
@@ -1585,7 +1626,7 @@ function resolveDOIForLookup(item: Zotero.Item, extra: string): DOIResolution {
     return { doi: fromExtra, arxivDOI: null, fromArxivURL: false };
   }
 
-  if (!getBooleanPref(OPENALEX_CORRECT_ARXIV_PREF, true)) {
+  if (!getBooleanPref(OPENALEX_CORRECT_ARXIV_PREF, false)) {
     return { doi: null, arxivDOI: null, fromArxivURL: false };
   }
 

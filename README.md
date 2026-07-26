@@ -16,8 +16,9 @@ The complete OpenAlex Work and Author responses are also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
 
-> READ CAREFULLY: The plugin will OVERWRITE the existing URL metadata of your items with the OpenAlex Work URL.
-> The rational is to use the DOI link as one-click link to the original source and URL as link to the OpenAlex Work page.
+By default, the plugin preserves the existing URL metadata of your items. Use `Go to OpenAlex Work
+page` in the item context menu to open the stored Work. URL replacement can be enabled in the plugin
+settings if preferred.
 
 ## What the plugin does
 
@@ -44,6 +45,8 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 3. Click `Get OpenAlex-WorkID`.
 
 For a single item, Zotero shows a direct result message. For multiple items, Zotero shows an aggregate summary.
+After an item has an OpenAlex Work ID, right-click it and choose `Go to OpenAlex Work page` to open
+its page on OpenAlex.
 
 ### Usage: Startup sync
 
@@ -59,7 +62,8 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `apiKey` (default empty): optional OpenAlex API key.
 - `autoUpdateOnStartup` (default `true`): check items for updates at startup.
 - `staleMonths` (default `3`): months after which the number of citations is updated.
-- `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
+- `correctArxivArticles` (default `false`): when enabled, if the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
+- `overwriteArticleURL` (default `false`): replace an item's URL with its OpenAlex Work page. When enabled, the `Go to OpenAlex Work page` context-menu command is hidden.
 - `showGraphTuningControls` (default `false`): show tunable graph settings directly in the Citation Graph window.
 - `minimumAuthorHIndex` (default `5`): hide authors whose cached h-index is below this
   inclusive threshold. Authors without h-index metadata are also hidden.
@@ -98,8 +102,8 @@ Get an OpenAlex API key at:
 - Existing `openalex.work_id`, `openalex.cit_count`, and `openalex.cit_date` lines are replaced when updated.
 - New lines are inserted before `Citation Key:` when present, otherwise appended.
 - Citation date is updated whenever a complete OpenAlex refresh is saved.
-- URL, `Extra`, and SQLite writes use the same fetched Work and timestamp. If one datastore fails,
-  the plugin attempts to restore the previous values.
+- When URL replacement is enabled, URL, `Extra`, and SQLite writes use the same fetched Work and
+  timestamp. If one datastore fails, the plugin attempts to restore the previous values.
 
 ## Privacy notes
 

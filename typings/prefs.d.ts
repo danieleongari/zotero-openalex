@@ -10,6 +10,7 @@ declare namespace _ZoteroTypes {
       "intensity": number;
       "autoUpdateOnStartup": boolean;
       "correctArxivArticles": boolean;
+      "overwriteArticleURL": boolean;
       "staleMonths": number;
       "requestDelayMs": number;
       "startupDelayMs": number;
