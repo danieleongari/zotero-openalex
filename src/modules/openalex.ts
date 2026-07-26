@@ -19,19 +19,29 @@ const CIT_COUNT_PREFIX = "openalex.cit_count:";
 const CIT_DATE_PREFIX = "openalex.cit_date:";
 const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
+const OPENALEX_ALERT_TITLE = "Zotero OpenAlex Plugin";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
+const ITEM_MENU_SEPARATOR_ID = "openalex-item-menu-separator";
+const GO_TO_OPENALEX_WORK_MENU_ID = "openalex-go-to-work-menuitem";
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "correctArxivArticles";
+const OPENALEX_OVERWRITE_ARTICLE_URL_PREF = "overwriteArticleURL";
 const GRAPH_SHOW_TUNING_CONTROLS_PREF = "showGraphTuningControls";
 const MINIMUM_AUTHOR_H_INDEX_PREF = "minimumAuthorHIndex";
 const OPENALEX_AUTHOR_BATCH_SIZE = 100;
+const CROSSREF_REQUEST_INTERVAL_MS = 250;
+const CROSSREF_MAX_ATTEMPTS = 4;
+const CROSSREF_RETRY_BASE_DELAY_MS = 2000;
+const CROSSREF_RETRY_MAX_DELAY_MS = 10000;
 
 const DOI_PATTERN = /\b10\.\d{4,9}\/[-._;()/:A-Z0-9]+\b/i;
 const ARXIV_URL_PATTERN = /arxiv\.org\/(?:abs|pdf)\/([^?#\s]+?)(?:\.pdf)?(?:[?#].*)?$/i;
 const ARXIV_ID_MODERN_PATTERN = /^\d{4}\.\d{4,5}$/;
 const ARXIV_ID_LEGACY_PATTERN = /^[a-z-]+(?:\.[a-z-]+)?\/\d{7}$/i;
 const ARXIV_DOI_PREFIX = "10.48550/arXiv.";
+const OPENALEX_WORK_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?openalex\.org\/works\/W\d+\/?(?:[?#].*)?$/i;
 const WORK_ID_LINE_PATTERN = /^openalex\.work_id:\s*(W\d+)\s*$/i;
 const CIT_COUNT_LINE_PATTERN = /^openalex\.cit_count:\s*(\d+)\s*$/i;
 const CIT_DATE_LINE_PATTERN = /^openalex\.cit_date:\s*(\d{4}-\d{1,2}-\d{1,2})\s*$/i;
@@ -46,6 +56,40 @@ interface OpenAlexMetadata {
 interface UpdateOutcome {
   status: "updated" | "unchanged" | "skipped";
   message?: string;
+}
+
+interface CrossrefURLRestoreProgress {
+  processedItems: number;
+  totalItems: number;
+  restoredItems: number;
+  failedItems: number;
+  message: string;
+}
+
+interface CrossrefURLRestoreResult {
+  scannedLibraries: number;
+  scannedGroupLibraries: number;
+  eligibleItems: number;
+  restoredItems: number;
+  missingDOIItems: number;
+  unresolvedItems: number;
+  failedItems: number;
+  rateLimitedItems: number;
+  lookupFailedItems: number;
+  saveFailedItems: number;
+}
+
+interface CrossrefURLLookupResult {
+  status: "resolved" | "unresolved" | "failed";
+  url: string | null;
+  failureReason?: "rate-limited" | "request";
+}
+
+interface CrossrefRetryProgress {
+  attempt: number;
+  maxAttempts: number;
+  delayMs: number;
+  reason: "rate-limited" | "request";
 }
 
 interface OpenAlexWork extends OpenAlexWorkPayload {
@@ -122,6 +166,7 @@ let citationColumnRegistrationToken: string | null = null;
 let startupInfoWindow: any = null;
 let startupInfoUsesLineAPI = false;
 let openAlexLastErrorMessage = "";
+let crossrefNextRequestAt = 0;
 const openAlexStore = new OpenAlexStore();
 
 class OpenAlexWorkIDClass {
@@ -133,6 +178,7 @@ class OpenAlexWorkIDClass {
     {
       onItemPopupShowing?: () => void;
       onItemCommand?: () => void;
+      onGoToWorkCommand?: () => void;
       onCollectionPopupShowing?: () => void;
       onCollectionCommand?: () => void;
       onSyncCommand?: () => void;
@@ -153,6 +199,10 @@ class OpenAlexWorkIDClass {
 
     this.removeFromWindow(window);
 
+    const itemMenuSeparator = doc.createXULElement("menuseparator");
+    itemMenuSeparator.setAttribute("id", ITEM_MENU_SEPARATOR_ID);
+    itemMenuPopup.appendChild(itemMenuSeparator);
+
     const menuItem = doc.createXULElement("menuitem");
     menuItem.setAttribute("label", "Get OpenAlex-WorkID");
     menuItem.setAttribute("id", "workid-menuitem");
@@ -162,12 +212,31 @@ class OpenAlexWorkIDClass {
       } catch (error) {
         Zotero.debug("Error updating OpenAlex data from selection");
         Zotero.debug(error);
-        window.alert("An error occurred while processing OpenAlex metadata.");
+        showOpenAlexAlert(window, "An error occurred while processing OpenAlex metadata.");
       }
     };
     menuItem.addEventListener("command", onItemCommand);
 
     itemMenuPopup.appendChild(menuItem);
+
+    const goToWorkMenuItem = doc.createXULElement("menuitem");
+    goToWorkMenuItem.setAttribute("label", "Go to OpenAlex Work page");
+    goToWorkMenuItem.setAttribute("id", GO_TO_OPENALEX_WORK_MENU_ID);
+    const onGoToWorkCommand = () => {
+      const selectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
+      const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null;
+      const workID = selectedItem
+        ? parseOpenAlexMetadata((selectedItem.getField("extra") as string) || "").workID
+        : null;
+      if (!workID) {
+        window.alert("No OpenAlex Work ID found for the selected item.");
+        return;
+      }
+
+      Zotero.launchURL(`https://openalex.org/works/${workID}`);
+    };
+    goToWorkMenuItem.addEventListener("command", onGoToWorkCommand);
+    itemMenuPopup.appendChild(goToWorkMenuItem);
 
     const onItemPopupShowing = () => {
       const pane = Zotero.getActiveZoteroPane();
@@ -180,6 +249,15 @@ class OpenAlexWorkIDClass {
         }
       });
       (menuItem as any).hidden = !hasEligibleParentSelection;
+      (itemMenuSeparator as any).hidden = !hasEligibleParentSelection;
+
+      const selectedItem = selectedItems.length === 1 ? selectedItems[0] : null;
+      const selectedWorkID =
+        selectedItem && selectedItem.isRegularItem() && selectedItem.isTopLevelItem()
+          ? parseOpenAlexMetadata((selectedItem.getField("extra") as string) || "").workID
+          : null;
+      const overwriteArticleURL = getBooleanPref(OPENALEX_OVERWRITE_ARTICLE_URL_PREF, false);
+      (goToWorkMenuItem as any).hidden = overwriteArticleURL || !selectedWorkID;
     };
     itemMenuPopup.addEventListener("popupshowing", onItemPopupShowing);
 
@@ -209,6 +287,7 @@ class OpenAlexWorkIDClass {
       this.windowCleanup.set(window, {
         onItemPopupShowing,
         onItemCommand,
+        onGoToWorkCommand,
         onCollectionPopupShowing,
         onCollectionCommand,
         onSyncCommand: this.addToolsSyncMenu(window),
@@ -219,6 +298,7 @@ class OpenAlexWorkIDClass {
     this.windowCleanup.set(window, {
       onItemPopupShowing,
       onItemCommand,
+      onGoToWorkCommand,
       onSyncCommand: this.addToolsSyncMenu(window),
     });
   }
@@ -256,6 +336,16 @@ class OpenAlexWorkIDClass {
 
     if (menuItem) {
       menuItem.remove();
+    }
+
+    doc.getElementById(ITEM_MENU_SEPARATOR_ID)?.remove();
+
+    const goToWorkMenuItem = doc.getElementById(GO_TO_OPENALEX_WORK_MENU_ID);
+    if (goToWorkMenuItem && cleanup?.onGoToWorkCommand) {
+      goToWorkMenuItem.removeEventListener("command", cleanup.onGoToWorkCommand);
+    }
+    if (goToWorkMenuItem) {
+      goToWorkMenuItem.remove();
     }
 
     const collectionMenuPopup = getCollectionMenuPopup(doc);
@@ -373,47 +463,47 @@ class OpenAlexWorkIDClass {
   async updateSelectedItems(window: Window) {
     const selectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
     if (!selectedItems.length) {
-      window.alert("No items selected.");
+      showOpenAlexAlert(window, "No items selected.");
       return;
     }
 
     const numItems = selectedItems.length;
-    let updatedCount = 0;
-    let unchangedCount = 0;
-    let skippedCount = 0;
+    let failedCount = 0;
 
     for (const item of selectedItems) {
       if (!item.isRegularItem()) {
-        skippedCount++;
+        failedCount++;
         if (numItems === 1) {
-          window.alert("Selected item is not a regular Zotero item.");
+          showOpenAlexAlert(window, "Selected item is not a regular Zotero item.");
         }
         continue;
       }
 
-      const outcome = await this.updateSingleItem(item);
-      if (outcome.status === "updated") {
-        updatedCount++;
-      } else if (outcome.status === "unchanged") {
-        unchangedCount++;
-      } else {
-        skippedCount++;
-      }
-
-      if (numItems === 1) {
-        if (outcome.status === "updated") {
-          window.alert(outcome.message || "OpenAlex metadata updated.");
-        } else if (outcome.status === "unchanged") {
-          window.alert("OpenAlex metadata is already up to date.");
-        } else {
-          window.alert(outcome.message || "No OpenAlex data found for the selected item.");
+      try {
+        const outcome = await this.updateSingleItem(item);
+        if (outcome.status === "skipped") {
+          failedCount++;
+          if (numItems === 1) {
+            showOpenAlexAlert(
+              window,
+              outcome.message || "No OpenAlex data found for the selected item.",
+            );
+          }
+        }
+      } catch (error) {
+        failedCount++;
+        Zotero.debug(`OpenAlex: unexpected error updating selected item ${item.id}`);
+        Zotero.debug(error);
+        if (numItems === 1) {
+          showOpenAlexAlert(window, "An error occurred while processing OpenAlex metadata.");
         }
       }
     }
 
-    if (numItems > 1) {
-      window.alert(
-        `Finished OpenAlex update for ${numItems} items (${updatedCount} updated, ${unchangedCount} unchanged, ${skippedCount} skipped).`,
+    if (numItems > 1 && failedCount > 0) {
+      showOpenAlexAlert(
+        window,
+        `OpenAlex metadata could not be updated for ${failedCount} of ${numItems} selected items.`,
       );
     }
   }
@@ -459,7 +549,7 @@ class OpenAlexWorkIDClass {
       if (itemChanged) {
         await item.saveTx();
         return {
-          status: "updated",
+          status: "skipped",
           message: "arXiv metadata corrected. No matching OpenAlex Work found.",
         };
       }
@@ -551,6 +641,133 @@ class OpenAlexWorkIDClass {
       .map((item) => parseOpenAlexMetadata((item.getField("extra") as string) || "").workID)
       .filter((workID): workID is string => Boolean(workID));
     return openAlexStore.clean(validWorkIDs);
+  }
+
+  async restoreCrossrefURLs(
+    onProgress?: (progress: CrossrefURLRestoreProgress) => void,
+  ): Promise<CrossrefURLRestoreResult> {
+    const notify = (progress: CrossrefURLRestoreProgress) => {
+      if (!onProgress) return;
+      try {
+        onProgress(progress);
+      } catch (error) {
+        Zotero.debug("OpenAlex: failed updating Crossref URL restoration progress");
+        Zotero.debug(error);
+      }
+    };
+
+    notify({
+      processedItems: 0,
+      totalItems: 0,
+      restoredItems: 0,
+      failedItems: 0,
+      message: "Checking Zotero items…",
+    });
+
+    const libraries = getUserAndGroupLibraries();
+    const groupLibraryCount = libraries.filter(
+      (library: any) => library.libraryType === "group",
+    ).length;
+    const allRegularItems = await getAllRegularItems(libraries);
+    const eligibleItems = allRegularItems.filter((item) =>
+      isOpenAlexWorkURL((item.getField("url") as string) || ""),
+    );
+    const result: CrossrefURLRestoreResult = {
+      scannedLibraries: libraries.length,
+      scannedGroupLibraries: groupLibraryCount,
+      eligibleItems: eligibleItems.length,
+      restoredItems: 0,
+      missingDOIItems: 0,
+      unresolvedItems: 0,
+      failedItems: 0,
+      rateLimitedItems: 0,
+      lookupFailedItems: 0,
+      saveFailedItems: 0,
+    };
+    const lookupCache = new Map<string, CrossrefURLLookupResult>();
+    const restoreStartedAt = Date.now();
+    let estimatedRemainingMs: number | null = null;
+    const libraryScope = formatLibraryScope(libraries.length, groupLibraryCount);
+
+    notify({
+      processedItems: 0,
+      totalItems: eligibleItems.length,
+      restoredItems: 0,
+      failedItems: 0,
+      message: eligibleItems.length
+        ? `Restoring Crossref URLs for ${eligibleItems.length} items across ${libraryScope}.${eligibleItems.length >= 10 ? " Time estimate available after 10 items." : ""}`
+        : `No items with OpenAlex Work URLs were found across ${libraryScope}.`,
+    });
+
+    for (let index = 0; index < eligibleItems.length; index++) {
+      const item = eligibleItems[index];
+      const extra = ((item.getField("extra") as string) || "").toString();
+      const doi = extractDOIForLookup(item, extra);
+
+      if (!doi) {
+        result.missingDOIItems++;
+      } else {
+        let lookup = lookupCache.get(doi);
+        if (!lookup) {
+          lookup = await fetchCrossrefPrimaryURL(doi, (retry) => {
+            const reason =
+              retry.reason === "rate-limited"
+                ? "Crossref rate limit reached"
+                : "Crossref request failed";
+            notify({
+              processedItems: index,
+              totalItems: eligibleItems.length,
+              restoredItems: result.restoredItems,
+              failedItems: result.failedItems,
+              message: `${reason}; waiting ${formatWaitSeconds(retry.delayMs)} before retry ${retry.attempt} of ${retry.maxAttempts}…${formatRemainingEstimate(estimatedRemainingMs)}`,
+            });
+          });
+          lookupCache.set(doi, lookup);
+        }
+
+        if (lookup.status === "resolved" && lookup.url) {
+          const originalURL = ((item.getField("url") as string) || "").toString();
+          try {
+            item.setField("url", lookup.url);
+            await item.saveTx();
+            result.restoredItems++;
+          } catch (error) {
+            item.setField("url", originalURL);
+            result.failedItems++;
+            result.saveFailedItems++;
+            Zotero.debug(`OpenAlex: failed restoring Crossref URL for item ${item.id}`);
+            Zotero.debug(error);
+          }
+        } else if (lookup.status === "unresolved") {
+          result.unresolvedItems++;
+        } else {
+          result.failedItems++;
+          if (lookup.failureReason === "rate-limited") {
+            result.rateLimitedItems++;
+          } else {
+            result.lookupFailedItems++;
+          }
+        }
+      }
+
+      const processedItems = index + 1;
+      if (processedItems % 10 === 0 || processedItems === eligibleItems.length) {
+        estimatedRemainingMs = estimateRemainingMilliseconds(
+          Date.now() - restoreStartedAt,
+          processedItems,
+          eligibleItems.length,
+        );
+      }
+      notify({
+        processedItems,
+        totalItems: eligibleItems.length,
+        restoredItems: result.restoredItems,
+        failedItems: result.failedItems,
+        message: `Processed ${processedItems} of ${eligibleItems.length} items across ${libraryScope}; ${result.restoredItems} URLs restored.${formatRemainingEstimate(estimatedRemainingMs)}`,
+      });
+    }
+
+    return result;
   }
 
   async main() {
@@ -732,6 +949,7 @@ async function synchronizeItemsWithWork(
   const fetchedAt = syncedAt.toISOString();
   const citationCount = normalizeCitationCount(apiWork.cited_by_count);
   const openAlexURL = `https://openalex.org/works/${workID}`;
+  const overwriteArticleURL = getBooleanPref(OPENALEX_OVERWRITE_ARTICLE_URL_PREF, false);
   const snapshots = items.map((item) => ({
     item,
     extra: ((item.getField("extra") as string) || "").toString(),
@@ -751,7 +969,7 @@ async function synchronizeItemsWithWork(
           citationDate: syncedAt,
         });
         const extraChanged = updatedExtra !== snapshot.extra;
-        const urlChanged = snapshot.url !== openAlexURL;
+        const urlChanged = overwriteArticleURL && snapshot.url !== openAlexURL;
         if (!extraChanged && !urlChanged && !forceSaveItemIDs.has(snapshot.item.id)) continue;
 
         if (extraChanged) snapshot.item.setField("extra", updatedExtra);
@@ -786,6 +1004,10 @@ async function synchronizeItemsWithWork(
 
 function getCollectionMenuPopup(doc: Document) {
   return doc.querySelector("#zotero-collectionmenu");
+}
+
+function showOpenAlexAlert(window: Window, message: string) {
+  Zotero.alert(window, OPENALEX_ALERT_TITLE, message);
 }
 
 function getSelectedCollectionID() {
@@ -1585,7 +1807,7 @@ function resolveDOIForLookup(item: Zotero.Item, extra: string): DOIResolution {
     return { doi: fromExtra, arxivDOI: null, fromArxivURL: false };
   }
 
-  if (!getBooleanPref(OPENALEX_CORRECT_ARXIV_PREF, true)) {
+  if (!getBooleanPref(OPENALEX_CORRECT_ARXIV_PREF, false)) {
     return { doi: null, arxivDOI: null, fromArxivURL: false };
   }
 
@@ -1633,6 +1855,89 @@ function normalizeDOI(value: string | undefined) {
 
   const match = doi.match(DOI_PATTERN);
   return match ? match[0].toLowerCase() : null;
+}
+
+function isOpenAlexWorkURL(value: string | undefined) {
+  return OPENALEX_WORK_URL_PATTERN.test(String(value || "").trim());
+}
+
+function extractCrossrefPrimaryURL(payload: unknown) {
+  const message = (payload as any)?.message;
+  const work = Array.isArray(message?.items) ? message.items[0] : message;
+  const rawURL = work?.resource?.primary?.URL;
+  if (typeof rawURL !== "string") return null;
+
+  const url = rawURL.trim();
+  return /^https?:\/\/\S+$/i.test(url) ? url : null;
+}
+
+function parseRetryAfterMilliseconds(value: string | null | undefined, now = Date.now()) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return null;
+
+  const seconds = Number(trimmed);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.ceil(seconds * 1000);
+  }
+
+  const retryAt = Date.parse(trimmed);
+  return Number.isFinite(retryAt) ? Math.max(0, retryAt - now) : null;
+}
+
+function formatWaitSeconds(milliseconds: number) {
+  const seconds = Math.max(1, Math.ceil(milliseconds / 1000));
+  return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+}
+
+function estimateRemainingMilliseconds(
+  elapsedMilliseconds: number,
+  processedItems: number,
+  totalItems: number,
+) {
+  if (elapsedMilliseconds < 0 || processedItems <= 0 || totalItems <= processedItems) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.round((elapsedMilliseconds / processedItems) * (totalItems - processedItems)),
+  );
+}
+
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m ${seconds}s`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes}m`;
+}
+
+function formatRemainingEstimate(milliseconds: number | null) {
+  return milliseconds === null ? "" : ` Estimated time remaining: ${formatDuration(milliseconds)}.`;
+}
+
+function isUserOrGroupLibrary(library: any) {
+  return Boolean(
+    library &&
+    !library.deleted &&
+    (library.libraryType === "user" || library.libraryType === "group"),
+  );
+}
+
+function getUserAndGroupLibraries() {
+  return Zotero.Libraries.getAll().filter(isUserOrGroupLibrary);
+}
+
+function formatLibraryScope(totalLibraries: number, groupLibraries: number) {
+  const personalLibraries = Math.max(0, totalLibraries - groupLibraries);
+  const personalLabel = `${personalLibraries} personal ${personalLibraries === 1 ? "library" : "libraries"}`;
+  const groupLabel = `${groupLibraries} group ${groupLibraries === 1 ? "library" : "libraries"}`;
+  return `${personalLabel} and ${groupLabel}`;
 }
 
 function extractArXivIDFromURL(urlValue: string | undefined) {
@@ -1772,14 +2077,7 @@ function shouldUpdateOnStartup(
   return isCitationStale(metadata.citationDate, staleMonths);
 }
 
-async function getAllRegularItems() {
-  const allLibraries = Zotero.Libraries.getAll().filter(
-    (library: any) =>
-      library &&
-      !library.deleted &&
-      (library.libraryType === "user" || library.libraryType === "group"),
-  );
-
+async function getAllRegularItems(allLibraries = getUserAndGroupLibraries()) {
   const itemIDs = new Set<number>();
 
   for (const library of allLibraries) {
@@ -1931,6 +2229,107 @@ async function fetchOpenAlexAuthorsByIDs(authorIDs: Iterable<string>) {
   });
   const response = await requestOpenAlexJSON(`${OPENALEX_BASE_URL}/authors?${params.toString()}`);
   return Array.isArray(response?.results) ? (response.results as OpenAlexAuthor[]) : [];
+}
+
+async function waitForCrossrefRequestSlot() {
+  const now = Date.now();
+  const scheduledAt = Math.max(now, crossrefNextRequestAt);
+  crossrefNextRequestAt = scheduledAt + CROSSREF_REQUEST_INTERVAL_MS;
+  const waitMs = scheduledAt - now;
+  if (waitMs > 0) {
+    await delay(waitMs);
+  }
+}
+
+async function fetchCrossrefPrimaryURL(
+  doi: string,
+  onRetry?: (progress: CrossrefRetryProgress) => void,
+): Promise<CrossrefURLLookupResult> {
+  const normalizedDOI = normalizeDOI(doi);
+  if (!normalizedDOI) {
+    return { status: "unresolved", url: null };
+  }
+
+  const url = `https://api.crossref.org/works/${encodeURIComponent(normalizedDOI)}`;
+
+  for (let attempt = 1; attempt <= CROSSREF_MAX_ATTEMPTS; attempt++) {
+    await waitForCrossrefRequestSlot();
+
+    let xhr: XMLHttpRequest;
+    try {
+      xhr = await Zotero.HTTP.request("GET", url, {
+        headers: { Accept: "application/json" },
+        timeout: 15000,
+        successCodes: false,
+      });
+    } catch (error) {
+      Zotero.debug(`OpenAlex: Crossref request failed for ${normalizedDOI}`);
+      Zotero.debug(error);
+      if (attempt === CROSSREF_MAX_ATTEMPTS) {
+        return { status: "failed", url: null, failureReason: "request" };
+      }
+
+      const delayMs = Math.min(
+        CROSSREF_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1),
+        CROSSREF_RETRY_MAX_DELAY_MS,
+      );
+      onRetry?.({
+        attempt: attempt + 1,
+        maxAttempts: CROSSREF_MAX_ATTEMPTS,
+        delayMs,
+        reason: "request",
+      });
+      await delay(delayMs);
+      continue;
+    }
+
+    const status = Number(xhr.status) || 0;
+    if (status === 404) {
+      return { status: "unresolved", url: null };
+    }
+
+    if (status === 429 || status >= 500) {
+      if (attempt === CROSSREF_MAX_ATTEMPTS) {
+        const failureReason = status === 429 ? "rate-limited" : "request";
+        Zotero.debug(
+          `OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status} after ${attempt} attempts.`,
+        );
+        return { status: "failed", url: null, failureReason };
+      }
+
+      const retryAfterMs = parseRetryAfterMilliseconds(xhr.getResponseHeader("Retry-After"));
+      const delayMs =
+        retryAfterMs ??
+        Math.min(CROSSREF_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1), CROSSREF_RETRY_MAX_DELAY_MS);
+      onRetry?.({
+        attempt: attempt + 1,
+        maxAttempts: CROSSREF_MAX_ATTEMPTS,
+        delayMs,
+        reason: status === 429 ? "rate-limited" : "request",
+      });
+      await delay(delayMs);
+      continue;
+    }
+
+    if (status < 200 || status >= 300) {
+      Zotero.debug(`OpenAlex: Crossref lookup failed for ${normalizedDOI} with HTTP ${status}.`);
+      return { status: "failed", url: null, failureReason: "request" };
+    }
+
+    try {
+      const payload = JSON.parse(String(xhr.responseText || ""));
+      const primaryURL = extractCrossrefPrimaryURL(payload);
+      return primaryURL
+        ? { status: "resolved", url: primaryURL }
+        : { status: "unresolved", url: null };
+    } catch (error) {
+      Zotero.debug(`OpenAlex: invalid Crossref response for ${normalizedDOI}`);
+      Zotero.debug(error);
+      return { status: "failed", url: null, failureReason: "request" };
+    }
+  }
+
+  return { status: "failed", url: null, failureReason: "request" };
 }
 
 function buildOpenAlexAuthorIDBatches(authorIDs: Iterable<string>) {
@@ -2177,4 +2576,12 @@ export const __test__ = {
   normalizeAuthorAffiliations,
   normalizeOpenAlexAuthorID,
   buildOpenAlexAuthorIDBatches,
+  isOpenAlexWorkURL,
+  extractCrossrefPrimaryURL,
+  parseRetryAfterMilliseconds,
+  formatWaitSeconds,
+  estimateRemainingMilliseconds,
+  formatDuration,
+  isUserOrGroupLibrary,
+  formatLibraryScope,
 };

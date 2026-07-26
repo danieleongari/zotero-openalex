@@ -241,4 +241,73 @@ describe("OpenAlex SQLite store", function () {
     assert.equal(batches[0][0], "A1");
     assert.equal(batches[2][4], "A205");
   });
+
+  it("recognizes only OpenAlex Work page URLs as restoration candidates", function () {
+    assert.isTrue(openAlexTest.isOpenAlexWorkURL("https://openalex.org/works/W123"));
+    assert.isTrue(openAlexTest.isOpenAlexWorkURL("https://www.openalex.org/works/w456/"));
+    assert.isFalse(openAlexTest.isOpenAlexWorkURL("https://openalex.org/authors/A123"));
+    assert.isFalse(openAlexTest.isOpenAlexWorkURL("https://example.com/works/W123"));
+  });
+
+  it("uses the same Crossref primary resource URL as Zotero's Crossref translator", function () {
+    assert.equal(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: {
+          items: [
+            {
+              URL: "https://doi.org/10.1234/example",
+              resource: {
+                primary: {
+                  URL: "https://publisher.example/article",
+                },
+              },
+            },
+          ],
+        },
+      }),
+      "https://publisher.example/article",
+    );
+    assert.equal(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: {
+          DOI: "10.1234/example",
+          resource: {
+            primary: {
+              URL: "https://publisher.example/single-record",
+            },
+          },
+        },
+      }),
+      "https://publisher.example/single-record",
+    );
+    assert.isNull(
+      openAlexTest.extractCrossrefPrimaryURL({
+        message: { items: [{ URL: "https://doi.org/10.1234/example" }] },
+      }),
+    );
+  });
+
+  it("parses Crossref Retry-After values and formats visible waits", function () {
+    assert.equal(openAlexTest.parseRetryAfterMilliseconds("2"), 2000);
+    assert.equal(
+      openAlexTest.parseRetryAfterMilliseconds("Wed, 21 Oct 2015 07:28:02 GMT", 1445412480000),
+      2000,
+    );
+    assert.isNull(openAlexTest.parseRetryAfterMilliseconds("not-a-delay"));
+    assert.equal(openAlexTest.formatWaitSeconds(250), "1 second");
+    assert.equal(openAlexTest.formatWaitSeconds(2100), "3 seconds");
+  });
+
+  it("estimates restoration time and includes every user and group library", function () {
+    assert.equal(openAlexTest.estimateRemainingMilliseconds(10000, 10, 30), 20000);
+    assert.equal(openAlexTest.estimateRemainingMilliseconds(10000, 30, 30), 0);
+    assert.equal(openAlexTest.formatDuration(90000), "1m 30s");
+    assert.equal(openAlexTest.formatDuration(3660000), "1h 1m");
+
+    assert.isTrue(openAlexTest.isUserOrGroupLibrary({ libraryType: "user", deleted: false }));
+    assert.isTrue(openAlexTest.isUserOrGroupLibrary({ libraryType: "group", deleted: false }));
+    assert.isFalse(openAlexTest.isUserOrGroupLibrary({ libraryType: "feed", deleted: false }));
+    assert.isFalse(openAlexTest.isUserOrGroupLibrary({ libraryType: "group", deleted: true }));
+    assert.equal(openAlexTest.formatLibraryScope(4, 3), "1 personal library and 3 group libraries");
+  });
 });

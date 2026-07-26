@@ -1,11 +1,15 @@
 const OPENALEX_API_KEY_PREF = "extensions.zotero-openalex.apiKey";
 const OPENALEX_CORRECT_ARXIV_PREF = "extensions.zotero-openalex.correctArxivArticles";
+const OPENALEX_OVERWRITE_ARTICLE_URL_PREF = "extensions.zotero-openalex.overwriteArticleURL";
 const OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF = "extensions.zotero-openalex.autoUpdateOnStartup";
 const OPENALEX_STALE_MONTHS_PREF = "extensions.zotero-openalex.staleMonths";
 const OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF =
   "extensions.zotero-openalex.showGraphTuningControls";
 const OPENALEX_MINIMUM_AUTHOR_H_INDEX_PREF = "extensions.zotero-openalex.minimumAuthorHIndex";
 const OPENALEX_TEST_WORK_PATH = "doi%3A10.7717%2Fpeerj.4375";
+const OPENALEX_API_KEY_SETTINGS_URL = "https://openalex.org/settings/api-key";
+const OPENALEX_DOCUMENTATION_URL =
+  "https://github.com/danieleongari/zotero-openalex/blob/main/README.md";
 let openAlexPaneInitialized = false;
 
 function getBooleanPrefValue(prefKey, fallback) {
@@ -57,6 +61,78 @@ function setCacheStatus(message, isError = false) {
 
   statusEl.textContent = message || "";
   statusEl.style.color = isError ? "#b3261e" : "";
+}
+
+function setCrossrefRestoreStatus(message, isError = false) {
+  const statusEl = document.getElementById("openalex-restore-crossref-status");
+  if (!statusEl) {
+    return;
+  }
+
+  statusEl.textContent = message || "";
+  statusEl.style.color = isError ? "#b3261e" : "";
+}
+
+function updateCrossrefRestoreProgress(progressEl, progress) {
+  const totalItems = Number(progress?.totalItems) || 0;
+  const processedItems = Number(progress?.processedItems) || 0;
+  progressEl.hidden = false;
+
+  if (totalItems > 0) {
+    progressEl.value = Math.max(0, Math.min(100, Math.round((processedItems / totalItems) * 100)));
+  } else {
+    progressEl.removeAttribute("value");
+  }
+
+  setCrossrefRestoreStatus(progress?.message || "Checking Zotero items…");
+}
+
+async function restoreCrossrefURLs(restoreBtn, progressEl) {
+  const bridge = getOpenAlexBridge();
+  if (!bridge || typeof bridge.restoreCrossrefURLs !== "function") {
+    setCrossrefRestoreStatus("Crossref URL restoration is unavailable.", true);
+    return;
+  }
+
+  restoreBtn.disabled = true;
+  progressEl.hidden = false;
+  progressEl.removeAttribute("value");
+  setCrossrefRestoreStatus("Checking Zotero items…");
+
+  try {
+    const result = await bridge.restoreCrossrefURLs((progress) => {
+      updateCrossrefRestoreProgress(progressEl, progress);
+    });
+
+    progressEl.value = 100;
+    const scannedLibraries = Number(result?.scannedLibraries) || 0;
+    const scannedGroupLibraries = Number(result?.scannedGroupLibraries) || 0;
+    const eligibleItems = Number(result?.eligibleItems) || 0;
+    const restoredItems = Number(result?.restoredItems) || 0;
+    const missingDOIItems = Number(result?.missingDOIItems) || 0;
+    const unresolvedItems = Number(result?.unresolvedItems) || 0;
+    const failedItems = Number(result?.failedItems) || 0;
+    const rateLimitedItems = Number(result?.rateLimitedItems) || 0;
+    const lookupFailedItems = Number(result?.lookupFailedItems) || 0;
+    const saveFailedItems = Number(result?.saveFailedItems) || 0;
+
+    if (!eligibleItems) {
+      setCrossrefRestoreStatus(
+        `No items with OpenAlex Work URLs were found across ${scannedLibraries} libraries (${scannedGroupLibraries} groups).`,
+      );
+      return;
+    }
+
+    setCrossrefRestoreStatus(
+      `Scanned ${scannedLibraries} libraries (${scannedGroupLibraries} groups). Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed (${rateLimitedItems} still rate-limited, ${lookupFailedItems} lookup, ${saveFailedItems} save).`,
+      failedItems > 0,
+    );
+  } catch (error) {
+    progressEl.value = 0;
+    setCrossrefRestoreStatus(`Crossref URL restoration failed: ${String(error)}`, true);
+  } finally {
+    restoreBtn.disabled = false;
+  }
 }
 
 function updateCacheCountElements(stats) {
@@ -190,11 +266,17 @@ function initOpenAlexPreferencesPane() {
   const autoUpdateCheckbox = document.getElementById("auto-update-on-startup");
   const staleMonthsInput = document.getElementById("stale-months");
   const arxivCheckbox = document.getElementById("openalex-correct-arxiv");
+  const overwriteArticleURLCheckbox = document.getElementById("openalex-overwrite-article-url");
+  const restoreCrossrefURLsBtn = document.getElementById("openalex-restore-crossref-urls");
+  const restoreCrossrefProgress = document.getElementById("openalex-restore-crossref-progress");
   const showGraphTuningControlsCheckbox = document.getElementById(
     "openalex-show-graph-tuning-controls",
   );
   const minimumAuthorHIndexInput = document.getElementById("minimum-author-h-index");
   const cacheCleanBtn = document.getElementById("openalex-cache-clean");
+  const apiKeyHeading = document.getElementById("openalex-api-key-heading");
+  const apiKeyLink = document.getElementById("openalex-api-key-link");
+  const documentationLink = document.getElementById("openalex-documentation-link");
   const inputEl = document.getElementById("openalex-api-key-input");
   const clearBtn = document.getElementById("openalex-api-key-clear");
   const testBtn = document.getElementById("openalex-api-key-test");
@@ -202,9 +284,15 @@ function initOpenAlexPreferencesPane() {
     !autoUpdateCheckbox ||
     !staleMonthsInput ||
     !arxivCheckbox ||
+    !overwriteArticleURLCheckbox ||
+    !restoreCrossrefURLsBtn ||
+    !restoreCrossrefProgress ||
     !showGraphTuningControlsCheckbox ||
     !minimumAuthorHIndexInput ||
     !cacheCleanBtn ||
+    !apiKeyHeading ||
+    !apiKeyLink ||
+    !documentationLink ||
     !inputEl ||
     !clearBtn ||
     !testBtn
@@ -217,12 +305,35 @@ function initOpenAlexPreferencesPane() {
   }
   openAlexPaneInitialized = true;
 
+  const openAPIKeySettings = (event) => {
+    event.preventDefault();
+    Zotero.launchURL(OPENALEX_API_KEY_SETTINGS_URL);
+  };
+  const openAPIKeySettingsFromKeyboard = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    openAPIKeySettings(event);
+  };
+  for (const linkEl of [apiKeyHeading, apiKeyLink]) {
+    linkEl.addEventListener("click", openAPIKeySettings);
+    linkEl.addEventListener("keydown", openAPIKeySettingsFromKeyboard);
+  }
+  documentationLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    Zotero.launchURL(OPENALEX_DOCUMENTATION_URL);
+  });
+
   autoUpdateCheckbox.checked = getBooleanPrefValue(OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF, true);
 
   const storedStaleMonthsValue = Zotero.Prefs.get(OPENALEX_STALE_MONTHS_PREF, true);
   staleMonthsInput.value = String(normalizeStaleMonths(storedStaleMonthsValue, 3));
 
-  arxivCheckbox.checked = getBooleanPrefValue(OPENALEX_CORRECT_ARXIV_PREF, true);
+  arxivCheckbox.checked = getBooleanPrefValue(OPENALEX_CORRECT_ARXIV_PREF, false);
+  overwriteArticleURLCheckbox.checked = getBooleanPrefValue(
+    OPENALEX_OVERWRITE_ARTICLE_URL_PREF,
+    false,
+  );
 
   const storedValue = Zotero.Prefs.get("extensions.zotero-openalex.apiKey", true) || "";
   inputEl.value = storedValue;
@@ -253,6 +364,18 @@ function initOpenAlexPreferencesPane() {
 
   arxivCheckbox.addEventListener("command", () => {
     Zotero.Prefs.set(OPENALEX_CORRECT_ARXIV_PREF, Boolean(arxivCheckbox.checked), true);
+  });
+
+  overwriteArticleURLCheckbox.addEventListener("command", () => {
+    Zotero.Prefs.set(
+      OPENALEX_OVERWRITE_ARTICLE_URL_PREF,
+      Boolean(overwriteArticleURLCheckbox.checked),
+      true,
+    );
+  });
+
+  restoreCrossrefURLsBtn.addEventListener("command", () => {
+    void restoreCrossrefURLs(restoreCrossrefURLsBtn, restoreCrossrefProgress);
   });
 
   showGraphTuningControlsCheckbox.addEventListener("command", () => {

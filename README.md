@@ -16,17 +16,15 @@ The complete OpenAlex Work and Author responses are also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
 
-> READ CAREFULLY: The plugin will OVERWRITE the existing URL metadata of your items with the OpenAlex Work URL.
-> The rational is to use the DOI link as one-click link to the original source and URL as link to the OpenAlex Work page.
-
-## What the plugin does
-
-- Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata.
-- Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
-- Stores complete OpenAlex Work and Author JSON in a local SQLite database.
-- Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
-- Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing citations, citations per year, and co-authors among the items in the Collection or its SubCollections. Graphs read metadata from SQLite and only request OpenAlex metadata that is missing from the cache.
+> ⚠️ **New behavior since v9.7.0**
+> ---
+>
+> By default, the plugin preserves the existing URL metadata of your items.
+> Use `Go to OpenAlex Work page` in the item context menu to open the stored Work.
+> URL replacement can be enabled in the plugin settings if preferred.
+> For those who want to restore the original Crossref URLs for items whose URL
+> was replaced by an OpenAlex Work page,
+> use the `Restore Crossref URLs` button in the plugin settings.
 
 ## Installation
 
@@ -37,13 +35,30 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 
 ## Usage
 
+What the plugin does:
+
+- Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata. You can trigger this manually or enable automatic updates at startup.
+- Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
+- Stores complete OpenAlex Work and Author JSON in a local SQLite database.
+- Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
+- Show the number of citations as the column "Citations"
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing citations, citations per year, and co-authors among the items in the Collection or its SubCollections. Graphs read metadata from SQLite and only request OpenAlex metadata that is missing from the cache.
+- Righ clicking on Items you can "Go to OpenAlex Work page" to open the stored Work in your browser. Alternatively, you can enable URL replacement in the plugin settings to have the OpenAlex Work page as the item URL.
+- OPTIONAL: you can set an OpenAlex API key in the plugin settings to improve request allowance.
+- OPTIONAL: you can enable "Correct Arxiv Articles" in the plugin settings to automatically change the item type to preprint and add the DOI when the DOI is missing and the URL specifies it is an arXiv article, for consistency purposes.
+
 ### Usage: Manual update
 
 1. Select one or more regular items in Zotero.
 2. Open the item context menu.
 3. Click `Get OpenAlex-WorkID`.
 
-For a single item, Zotero shows a direct result message. For multiple items, Zotero shows an aggregate summary.
+Successful updates do not show a dialog. If a single item cannot be updated, Zotero shows the
+reason. For multiple items, a dialog appears only when some items fail and reports the number of
+failed items.
+
+After an item has an OpenAlex Work ID, right-click it and choose `Go to OpenAlex Work page` to open
+its page on OpenAlex.
 
 ### Usage: Startup sync
 
@@ -59,10 +74,18 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `apiKey` (default empty): optional OpenAlex API key.
 - `autoUpdateOnStartup` (default `true`): check items for updates at startup.
 - `staleMonths` (default `3`): months after which the number of citations is updated.
-- `correctArxivArticles` (default `true`): when the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
+- `correctArxivArticles` (default `false`): when enabled, if the DOI is missing and the URL specifies it is an arXiv article, change the `Item Type` to preprint and add the DOI accordingly.
+- `overwriteArticleURL` (default `false`): replace an item's URL with its OpenAlex Work page. When enabled, the `Go to OpenAlex Work page` context-menu command is hidden.
 - `showGraphTuningControls` (default `false`): show tunable graph settings directly in the Citation Graph window.
 - `minimumAuthorHIndex` (default `5`): hide authors whose cached h-index is below this
   inclusive threshold. Authors without h-index metadata are also hidden.
+
+`Restore Crossref URLs` scans non-deleted regular items in user and group libraries whose URL is an
+OpenAlex Work page. For each item with a DOI, it restores the primary resource URL returned by
+Crossref—the same URL field used by Zotero's Crossref translator—and shows live progress plus a
+completion summary. Crossref requests use its single-record endpoint, are paced below the public
+rate limit, and retry temporary failures with backoff. Progress includes an estimated remaining time
+that is recalculated every 10 items. Items without a DOI or Crossref primary URL are left unchanged.
 
 The Metadata Cache section shows the number of cached Works and Authors. Its cleanup action compares
 the database with non-deleted items in all user and group libraries, removes Works no longer present
@@ -98,8 +121,8 @@ Get an OpenAlex API key at:
 - Existing `openalex.work_id`, `openalex.cit_count`, and `openalex.cit_date` lines are replaced when updated.
 - New lines are inserted before `Citation Key:` when present, otherwise appended.
 - Citation date is updated whenever a complete OpenAlex refresh is saved.
-- URL, `Extra`, and SQLite writes use the same fetched Work and timestamp. If one datastore fails,
-  the plugin attempts to restore the previous values.
+- When URL replacement is enabled, URL, `Extra`, and SQLite writes use the same fetched Work and
+  timestamp. If one datastore fails, the plugin attempts to restore the previous values.
 
 ## Privacy notes
 

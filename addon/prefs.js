@@ -1,6 +1,7 @@
 pref("extensions.zotero-openalex.intensity", 100);
 pref("extensions.zotero-openalex.autoUpdateOnStartup", true);
-pref("extensions.zotero-openalex.correctArxivArticles", true);
+pref("extensions.zotero-openalex.correctArxivArticles", false);
+pref("extensions.zotero-openalex.overwriteArticleURL", false);
 pref("extensions.zotero-openalex.staleMonths", 3);
 pref("extensions.zotero-openalex.requestDelayMs", 1000);
 pref("extensions.zotero-openalex.startupDelayMs", 3000);
