@@ -297,4 +297,17 @@ describe("OpenAlex SQLite store", function () {
     assert.equal(openAlexTest.formatWaitSeconds(250), "1 second");
     assert.equal(openAlexTest.formatWaitSeconds(2100), "3 seconds");
   });
+
+  it("estimates restoration time and includes every user and group library", function () {
+    assert.equal(openAlexTest.estimateRemainingMilliseconds(10000, 10, 30), 20000);
+    assert.equal(openAlexTest.estimateRemainingMilliseconds(10000, 30, 30), 0);
+    assert.equal(openAlexTest.formatDuration(90000), "1m 30s");
+    assert.equal(openAlexTest.formatDuration(3660000), "1h 1m");
+
+    assert.isTrue(openAlexTest.isUserOrGroupLibrary({ libraryType: "user", deleted: false }));
+    assert.isTrue(openAlexTest.isUserOrGroupLibrary({ libraryType: "group", deleted: false }));
+    assert.isFalse(openAlexTest.isUserOrGroupLibrary({ libraryType: "feed", deleted: false }));
+    assert.isFalse(openAlexTest.isUserOrGroupLibrary({ libraryType: "group", deleted: true }));
+    assert.equal(openAlexTest.formatLibraryScope(4, 3), "1 personal library and 3 group libraries");
+  });
 });

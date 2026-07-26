@@ -67,6 +67,8 @@ interface CrossrefURLRestoreProgress {
 }
 
 interface CrossrefURLRestoreResult {
+  scannedLibraries: number;
+  scannedGroupLibraries: number;
   eligibleItems: number;
   restoredItems: number;
   missingDOIItems: number;
@@ -662,11 +664,17 @@ class OpenAlexWorkIDClass {
       message: "Checking Zotero items…",
     });
 
-    const allRegularItems = await getAllRegularItems();
+    const libraries = getUserAndGroupLibraries();
+    const groupLibraryCount = libraries.filter(
+      (library: any) => library.libraryType === "group",
+    ).length;
+    const allRegularItems = await getAllRegularItems(libraries);
     const eligibleItems = allRegularItems.filter((item) =>
       isOpenAlexWorkURL((item.getField("url") as string) || ""),
     );
     const result: CrossrefURLRestoreResult = {
+      scannedLibraries: libraries.length,
+      scannedGroupLibraries: groupLibraryCount,
       eligibleItems: eligibleItems.length,
       restoredItems: 0,
       missingDOIItems: 0,
@@ -677,6 +685,9 @@ class OpenAlexWorkIDClass {
       saveFailedItems: 0,
     };
     const lookupCache = new Map<string, CrossrefURLLookupResult>();
+    const restoreStartedAt = Date.now();
+    let estimatedRemainingMs: number | null = null;
+    const libraryScope = formatLibraryScope(libraries.length, groupLibraryCount);
 
     notify({
       processedItems: 0,
@@ -684,8 +695,8 @@ class OpenAlexWorkIDClass {
       restoredItems: 0,
       failedItems: 0,
       message: eligibleItems.length
-        ? `Restoring Crossref URLs for ${eligibleItems.length} items…`
-        : "No items with OpenAlex Work URLs were found.",
+        ? `Restoring Crossref URLs for ${eligibleItems.length} items across ${libraryScope}.${eligibleItems.length >= 10 ? " Time estimate available after 10 items." : ""}`
+        : `No items with OpenAlex Work URLs were found across ${libraryScope}.`,
     });
 
     for (let index = 0; index < eligibleItems.length; index++) {
@@ -708,7 +719,7 @@ class OpenAlexWorkIDClass {
               totalItems: eligibleItems.length,
               restoredItems: result.restoredItems,
               failedItems: result.failedItems,
-              message: `${reason}; waiting ${formatWaitSeconds(retry.delayMs)} before retry ${retry.attempt} of ${retry.maxAttempts}…`,
+              message: `${reason}; waiting ${formatWaitSeconds(retry.delayMs)} before retry ${retry.attempt} of ${retry.maxAttempts}…${formatRemainingEstimate(estimatedRemainingMs)}`,
             });
           });
           lookupCache.set(doi, lookup);
@@ -740,12 +751,19 @@ class OpenAlexWorkIDClass {
       }
 
       const processedItems = index + 1;
+      if (processedItems % 10 === 0 || processedItems === eligibleItems.length) {
+        estimatedRemainingMs = estimateRemainingMilliseconds(
+          Date.now() - restoreStartedAt,
+          processedItems,
+          eligibleItems.length,
+        );
+      }
       notify({
         processedItems,
         totalItems: eligibleItems.length,
         restoredItems: result.restoredItems,
         failedItems: result.failedItems,
-        message: `Processed ${processedItems} of ${eligibleItems.length} items; ${result.restoredItems} URLs restored.`,
+        message: `Processed ${processedItems} of ${eligibleItems.length} items across ${libraryScope}; ${result.restoredItems} URLs restored.${formatRemainingEstimate(estimatedRemainingMs)}`,
       });
     }
 
@@ -1871,6 +1889,57 @@ function formatWaitSeconds(milliseconds: number) {
   return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
 }
 
+function estimateRemainingMilliseconds(
+  elapsedMilliseconds: number,
+  processedItems: number,
+  totalItems: number,
+) {
+  if (elapsedMilliseconds < 0 || processedItems <= 0 || totalItems <= processedItems) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.round((elapsedMilliseconds / processedItems) * (totalItems - processedItems)),
+  );
+}
+
+function formatDuration(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (totalMinutes < 60) return `${totalMinutes}m ${seconds}s`;
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}h ${minutes}m`;
+}
+
+function formatRemainingEstimate(milliseconds: number | null) {
+  return milliseconds === null ? "" : ` Estimated time remaining: ${formatDuration(milliseconds)}.`;
+}
+
+function isUserOrGroupLibrary(library: any) {
+  return Boolean(
+    library &&
+    !library.deleted &&
+    (library.libraryType === "user" || library.libraryType === "group"),
+  );
+}
+
+function getUserAndGroupLibraries() {
+  return Zotero.Libraries.getAll().filter(isUserOrGroupLibrary);
+}
+
+function formatLibraryScope(totalLibraries: number, groupLibraries: number) {
+  const personalLibraries = Math.max(0, totalLibraries - groupLibraries);
+  const personalLabel = `${personalLibraries} personal ${personalLibraries === 1 ? "library" : "libraries"}`;
+  const groupLabel = `${groupLibraries} group ${groupLibraries === 1 ? "library" : "libraries"}`;
+  return `${personalLabel} and ${groupLabel}`;
+}
+
 function extractArXivIDFromURL(urlValue: string | undefined) {
   if (!urlValue) return null;
 
@@ -2008,14 +2077,7 @@ function shouldUpdateOnStartup(
   return isCitationStale(metadata.citationDate, staleMonths);
 }
 
-async function getAllRegularItems() {
-  const allLibraries = Zotero.Libraries.getAll().filter(
-    (library: any) =>
-      library &&
-      !library.deleted &&
-      (library.libraryType === "user" || library.libraryType === "group"),
-  );
-
+async function getAllRegularItems(allLibraries = getUserAndGroupLibraries()) {
   const itemIDs = new Set<number>();
 
   for (const library of allLibraries) {
@@ -2518,4 +2580,8 @@ export const __test__ = {
   extractCrossrefPrimaryURL,
   parseRetryAfterMilliseconds,
   formatWaitSeconds,
+  estimateRemainingMilliseconds,
+  formatDuration,
+  isUserOrGroupLibrary,
+  formatLibraryScope,
 };

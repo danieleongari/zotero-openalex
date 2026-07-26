@@ -102,6 +102,8 @@ async function restoreCrossrefURLs(restoreBtn, progressEl) {
     });
 
     progressEl.value = 100;
+    const scannedLibraries = Number(result?.scannedLibraries) || 0;
+    const scannedGroupLibraries = Number(result?.scannedGroupLibraries) || 0;
     const eligibleItems = Number(result?.eligibleItems) || 0;
     const restoredItems = Number(result?.restoredItems) || 0;
     const missingDOIItems = Number(result?.missingDOIItems) || 0;
@@ -112,12 +114,14 @@ async function restoreCrossrefURLs(restoreBtn, progressEl) {
     const saveFailedItems = Number(result?.saveFailedItems) || 0;
 
     if (!eligibleItems) {
-      setCrossrefRestoreStatus("No items with OpenAlex Work URLs were found.");
+      setCrossrefRestoreStatus(
+        `No items with OpenAlex Work URLs were found across ${scannedLibraries} libraries (${scannedGroupLibraries} groups).`,
+      );
       return;
     }
 
     setCrossrefRestoreStatus(
-      `Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed (${rateLimitedItems} still rate-limited, ${lookupFailedItems} lookup, ${saveFailedItems} save).`,
+      `Scanned ${scannedLibraries} libraries (${scannedGroupLibraries} groups). Finished: ${restoredItems} of ${eligibleItems} URLs restored; ${missingDOIItems} missing DOI; ${unresolvedItems} without a Crossref primary URL; ${failedItems} failed (${rateLimitedItems} still rate-limited, ${lookupFailedItems} lookup, ${saveFailedItems} save).`,
       failedItems > 0,
     );
   } catch (error) {
