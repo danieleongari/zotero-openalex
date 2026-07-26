@@ -44,7 +44,10 @@ settings if preferred.
 2. Open the item context menu.
 3. Click `Get OpenAlex-WorkID`.
 
-For a single item, Zotero shows a direct result message. For multiple items, Zotero shows an aggregate summary.
+Successful updates do not show a dialog. If a single item cannot be updated, Zotero shows the
+reason. For multiple items, a dialog appears only when some items fail and reports the number of
+failed items.
+
 After an item has an OpenAlex Work ID, right-click it and choose `Go to OpenAlex Work page` to open
 its page on OpenAlex.
 

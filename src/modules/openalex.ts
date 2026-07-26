@@ -19,6 +19,7 @@ const CIT_COUNT_PREFIX = "openalex.cit_count:";
 const CIT_DATE_PREFIX = "openalex.cit_date:";
 const COLUMN_DATA_KEY = "openAlexCitations";
 const COLUMN_LABEL = "Citations";
+const OPENALEX_ALERT_TITLE = "Zotero OpenAlex Plugin";
 const TOOLS_SYNC_MENU_ID = "openalex-startup-sync-menuitem";
 const COLLECTION_GRAPH_MENU_ID = "openalex-collection-citation-graph-menuitem";
 const ITEM_MENU_SEPARATOR_ID = "openalex-item-menu-separator";
@@ -170,7 +171,7 @@ class OpenAlexWorkIDClass {
       } catch (error) {
         Zotero.debug("Error updating OpenAlex data from selection");
         Zotero.debug(error);
-        window.alert("An error occurred while processing OpenAlex metadata.");
+        showOpenAlexAlert(window, "An error occurred while processing OpenAlex metadata.");
       }
     };
     menuItem.addEventListener("command", onItemCommand);
@@ -421,47 +422,47 @@ class OpenAlexWorkIDClass {
   async updateSelectedItems(window: Window) {
     const selectedItems = Zotero.getActiveZoteroPane()?.getSelectedItems() || [];
     if (!selectedItems.length) {
-      window.alert("No items selected.");
+      showOpenAlexAlert(window, "No items selected.");
       return;
     }
 
     const numItems = selectedItems.length;
-    let updatedCount = 0;
-    let unchangedCount = 0;
-    let skippedCount = 0;
+    let failedCount = 0;
 
     for (const item of selectedItems) {
       if (!item.isRegularItem()) {
-        skippedCount++;
+        failedCount++;
         if (numItems === 1) {
-          window.alert("Selected item is not a regular Zotero item.");
+          showOpenAlexAlert(window, "Selected item is not a regular Zotero item.");
         }
         continue;
       }
 
-      const outcome = await this.updateSingleItem(item);
-      if (outcome.status === "updated") {
-        updatedCount++;
-      } else if (outcome.status === "unchanged") {
-        unchangedCount++;
-      } else {
-        skippedCount++;
-      }
-
-      if (numItems === 1) {
-        if (outcome.status === "updated") {
-          window.alert(outcome.message || "OpenAlex metadata updated.");
-        } else if (outcome.status === "unchanged") {
-          window.alert("OpenAlex metadata is already up to date.");
-        } else {
-          window.alert(outcome.message || "No OpenAlex data found for the selected item.");
+      try {
+        const outcome = await this.updateSingleItem(item);
+        if (outcome.status === "skipped") {
+          failedCount++;
+          if (numItems === 1) {
+            showOpenAlexAlert(
+              window,
+              outcome.message || "No OpenAlex data found for the selected item.",
+            );
+          }
+        }
+      } catch (error) {
+        failedCount++;
+        Zotero.debug(`OpenAlex: unexpected error updating selected item ${item.id}`);
+        Zotero.debug(error);
+        if (numItems === 1) {
+          showOpenAlexAlert(window, "An error occurred while processing OpenAlex metadata.");
         }
       }
     }
 
-    if (numItems > 1) {
-      window.alert(
-        `Finished OpenAlex update for ${numItems} items (${updatedCount} updated, ${unchangedCount} unchanged, ${skippedCount} skipped).`,
+    if (numItems > 1 && failedCount > 0) {
+      showOpenAlexAlert(
+        window,
+        `OpenAlex metadata could not be updated for ${failedCount} of ${numItems} selected items.`,
       );
     }
   }
@@ -507,7 +508,7 @@ class OpenAlexWorkIDClass {
       if (itemChanged) {
         await item.saveTx();
         return {
-          status: "updated",
+          status: "skipped",
           message: "arXiv metadata corrected. No matching OpenAlex Work found.",
         };
       }
@@ -835,6 +836,10 @@ async function synchronizeItemsWithWork(
 
 function getCollectionMenuPopup(doc: Document) {
   return doc.querySelector("#zotero-collectionmenu");
+}
+
+function showOpenAlexAlert(window: Window, message: string) {
+  Zotero.alert(window, OPENALEX_ALERT_TITLE, message);
 }
 
 function getSelectedCollectionID() {
