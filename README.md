@@ -18,9 +18,11 @@ OpenAlex Work ID and is not synchronized through Zotero Sync.
 
 > ⚠️ **New behavior since v9.7.0**
 > ---
-> By default, the plugin preserves the existing URL metadata of your items. Use `Go to OpenAlex Work
-> page` in the item context menu to open the stored Work. URL replacement can be enabled in the plugin
-> settings if preferred. 
+> By default, the plugin preserves the existing URL metadata of your items. Use `Go to OpenAlex Work page` 
+> in the item context menu to open the stored Work. 
+> URL replacement can be enabled in the plugin settings if preferred. 
+> For those who want to restore the original Crossref URLs for items whose URL was replaced by an OpenAlex Work page, 
+> use the `Restore Crossref URLs` button in the plugin settings. 
 
 ## Installation
 
@@ -76,7 +78,7 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 - `minimumAuthorHIndex` (default `5`): hide authors whose cached h-index is below this
   inclusive threshold. Authors without h-index metadata are also hidden.
 
-`Restore CrossRef URLs` scans non-deleted regular items in user and group libraries whose URL is an
+`Restore Crossref URLs` scans non-deleted regular items in user and group libraries whose URL is an
 OpenAlex Work page. For each item with a DOI, it restores the primary resource URL returned by
 Crossref—the same URL field used by Zotero's Crossref translator—and shows live progress plus a
 completion summary. Crossref requests use its single-record endpoint, are paced below the public

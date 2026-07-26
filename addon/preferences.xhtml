@@ -1,6 +1,14 @@
 <vbox onload="initOpenAlexPreferencesPane()" xmlns:html="http://www.w3.org/1999/xhtml">
   <groupbox>
-    <label value="OpenAlex API key" />
+    <h2
+      id="openalex-api-key-heading"
+      role="link"
+      tabindex="0"
+      title="Open OpenAlex API key settings"
+      style="margin-block-end: 0.5em; cursor: pointer"
+    >
+      OpenAlex API Key
+    </h2>
 
     <html:input
       id="openalex-api-key-input"
@@ -8,7 +16,18 @@
       autocomplete="off"
       style="width: 32em; max-width: 100%"
     />
-    <description> Stored locally in Zotero preferences. Not written to Zotero items. </description>
+    <description>
+      NOTE: adding an
+      <html:a
+        id="openalex-api-key-link"
+        href="https://openalex.org/settings/api-key"
+        target="_blank"
+      >
+        API key
+      </html:a>
+      increases your request allowance by 10x. Your key will be kept private and stored locally in
+      Zotero preferences.
+    </description>
 
     <hbox align="center">
       <button id="openalex-api-key-clear" label="Clear" />
@@ -16,19 +35,21 @@
     </hbox>
     <description id="openalex-api-key-status" style="min-height: 1.4em" />
 
-    <h2>Custom Settings</h2>
+    <separator orient="vertical" style="height: 1.2em; margin-inline: 0.5em" />
+
+    <h2 style="margin-block-end: 0.5em">Custom Settings</h2>
 
     <checkbox id="auto-update-on-startup" label="Check items for updates at startup" />
 
     <hbox align="center">
-      <label value="Months after which the number of citations is updated:" />
       <html:input
         id="stale-months"
         type="number"
         min="1"
         max="36"
-        style="width: 4em; max-width: 100%; margin-inline-start: 0.5em"
+        style="width: 2.7em; max-width: 100%; margin-inline-start: -0.2em"
       />
+      <label value="Months after which the number of citations is updated." />
     </hbox>
 
     <checkbox
@@ -38,20 +59,21 @@
 
     <checkbox
       id="openalex-overwrite-article-url"
-      label="Overwrite article's URL with OpenAlex Work link (instead of linking in the right-click menu)"
+      label="Overwrite item's URL with OpenAlex Work link (instead of right-click menu link)"
     />
 
     <hbox align="center">
-      <button id="openalex-restore-crossref-urls" label="Restore CrossRef URLs" />
+      <button id="openalex-restore-crossref-urls" label="Restore Crossref URLs" />
+      <description flex="1" style="margin-inline-start: 0.5em">
+        Restores URLs for items whose URL is currently an OpenAlex Work page, using the primary URL
+        returned for the item's DOI by Crossref. Future OpenAlex updates can replace these URLs
+        again when URL overwriting is enabled.
+      </description>
     </hbox>
-    <description>
-      Restores URLs for items whose URL is currently an OpenAlex Work page, using the primary URL
-      returned for the item's DOI by Crossref. Future OpenAlex updates can replace these URLs again
-      when URL overwriting is enabled.
-    </description>
+
     <html:progress
       id="openalex-restore-crossref-progress"
-      max="100"
+      max="99"
       value="0"
       hidden="true"
       style="width: 32em; max-width: 100%"
@@ -63,35 +85,47 @@
       label="Show graph tuning controls in the Citation Graph window"
     />
 
-    <h2>Co-Authors</h2>
-
     <hbox align="center">
-      <label value="Minimum h-index shown in Co-Authors:" />
       <html:input
         id="minimum-author-h-index"
         type="number"
         min="0"
         max="1000"
         step="1"
-        style="width: 5em; max-width: 100%; margin-inline-start: 0.5em"
+        style="width: 2.7em; max-width: 100%; margin-inline-start: -0.2em"
       />
+      <description flex="1">
+        h-index minimum to be shown in the Co-Authors graph. Authors below this value, or without
+        cached h-index metadata, are hidden. Authors exactly at the threshold remain visible. Set 0
+        to disable the numeric cutoff.
+      </description>
     </hbox>
-    <description>
-      Authors below this value, or without cached h-index metadata, are hidden. Authors exactly at
-      the threshold remain visible. Set 0 to disable the numeric cutoff.
-    </description>
 
-    <h2>Metadata Cache</h2>
+    <separator orient="vertical" style="height: 1.2em; margin-inline: 0.5em" />
+
+    <h2 style="margin-block-end: 0.5em">Metadata Cache</h2>
 
     <description id="openalex-cache-works-count">Works metadata: Loading…</description>
     <description id="openalex-cache-authors-count">Authors metadata: Loading…</description>
     <hbox align="center">
       <button id="openalex-cache-clean" label="Clean metadata cache…" />
+      <description flex="1" style="margin-inline-start: 0.5em">
+        Cleaning the cache, by checking non-deleted items in your Zotero user and group libraries,
+        and then removing unreferenced Works and Authors.
+      </description>
     </hbox>
-    <description>
-      Compares the cache with non-deleted items in your Zotero user and group libraries, then
-      removes unreferenced Works and Authors. This does not make network requests.
-    </description>
     <description id="openalex-cache-status" style="min-height: 1.4em" />
+
+    <description style="font-style: italic">
+      To learn more about all these settings, please visit the
+      <html:a
+        id="openalex-documentation-link"
+        href="https://github.com/danieleongari/zotero-openalex/blob/main/README.md"
+        target="_blank"
+      >
+        documentation on GitHub
+      </html:a>
+      .
+    </description>
   </groupbox>
 </vbox>

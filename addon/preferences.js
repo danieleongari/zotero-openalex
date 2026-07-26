@@ -7,6 +7,9 @@ const OPENALEX_SHOW_GRAPH_TUNING_CONTROLS_PREF =
   "extensions.zotero-openalex.showGraphTuningControls";
 const OPENALEX_MINIMUM_AUTHOR_H_INDEX_PREF = "extensions.zotero-openalex.minimumAuthorHIndex";
 const OPENALEX_TEST_WORK_PATH = "doi%3A10.7717%2Fpeerj.4375";
+const OPENALEX_API_KEY_SETTINGS_URL = "https://openalex.org/settings/api-key";
+const OPENALEX_DOCUMENTATION_URL =
+  "https://github.com/danieleongari/zotero-openalex/blob/main/README.md";
 let openAlexPaneInitialized = false;
 
 function getBooleanPrefValue(prefKey, fallback) {
@@ -271,6 +274,9 @@ function initOpenAlexPreferencesPane() {
   );
   const minimumAuthorHIndexInput = document.getElementById("minimum-author-h-index");
   const cacheCleanBtn = document.getElementById("openalex-cache-clean");
+  const apiKeyHeading = document.getElementById("openalex-api-key-heading");
+  const apiKeyLink = document.getElementById("openalex-api-key-link");
+  const documentationLink = document.getElementById("openalex-documentation-link");
   const inputEl = document.getElementById("openalex-api-key-input");
   const clearBtn = document.getElementById("openalex-api-key-clear");
   const testBtn = document.getElementById("openalex-api-key-test");
@@ -284,6 +290,9 @@ function initOpenAlexPreferencesPane() {
     !showGraphTuningControlsCheckbox ||
     !minimumAuthorHIndexInput ||
     !cacheCleanBtn ||
+    !apiKeyHeading ||
+    !apiKeyLink ||
+    !documentationLink ||
     !inputEl ||
     !clearBtn ||
     !testBtn
@@ -295,6 +304,25 @@ function initOpenAlexPreferencesPane() {
     return;
   }
   openAlexPaneInitialized = true;
+
+  const openAPIKeySettings = (event) => {
+    event.preventDefault();
+    Zotero.launchURL(OPENALEX_API_KEY_SETTINGS_URL);
+  };
+  const openAPIKeySettingsFromKeyboard = (event) => {
+    if (event.key !== "Enter" && event.key !== " ") {
+      return;
+    }
+    openAPIKeySettings(event);
+  };
+  for (const linkEl of [apiKeyHeading, apiKeyLink]) {
+    linkEl.addEventListener("click", openAPIKeySettings);
+    linkEl.addEventListener("keydown", openAPIKeySettingsFromKeyboard);
+  }
+  documentationLink.addEventListener("click", (event) => {
+    event.preventDefault();
+    Zotero.launchURL(OPENALEX_DOCUMENTATION_URL);
+  });
 
   autoUpdateCheckbox.checked = getBooleanPrefValue(OPENALEX_AUTO_UPDATE_ON_STARTUP_PREF, true);
 
