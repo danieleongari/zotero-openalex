@@ -16,18 +16,11 @@ The complete OpenAlex Work and Author responses are also cached locally in
 `zotero-openalex.sqlite` in the Zotero data directory. The cache is shared by items with the same
 OpenAlex Work ID and is not synchronized through Zotero Sync.
 
-By default, the plugin preserves the existing URL metadata of your items. Use `Go to OpenAlex Work
-page` in the item context menu to open the stored Work. URL replacement can be enabled in the plugin
-settings if preferred.
-
-## What the plugin does
-
-- Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata.
-- Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
-- Stores complete OpenAlex Work and Author JSON in a local SQLite database.
-- Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
-- Show the number of citations as the column "Citations"
-- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing citations, citations per year, and co-authors among the items in the Collection or its SubCollections. Graphs read metadata from SQLite and only request OpenAlex metadata that is missing from the cache.
+> ⚠️ **New behavior since v9.7.0**
+> ---
+> By default, the plugin preserves the existing URL metadata of your items. Use `Go to OpenAlex Work
+> page` in the item context menu to open the stored Work. URL replacement can be enabled in the plugin
+> settings if preferred. 
 
 ## Installation
 
@@ -37,6 +30,18 @@ settings if preferred.
 4. Select the downloaded `.xpi` file and click `Open`
 
 ## Usage
+
+What the plugin does:
+
+- Uses DOI-based lookup against the OpenAlex API to retrieve complete Work metadata. You can trigger this manually or enable automatic updates at startup.
+- Stores as Extra `openalex.work_id`, `openalex.cit_count`, `openalex.cit_date`
+- Stores complete OpenAlex Work and Author JSON in a local SQLite database.
+- Updates citation counts when the `cit_date` is older that 3 months (or a span that the user can customize)
+- Show the number of citations as the column "Citations"
+- Right clicking on Libraries and Collections, the user can "Generate OpenAlex Graphs" showing citations, citations per year, and co-authors among the items in the Collection or its SubCollections. Graphs read metadata from SQLite and only request OpenAlex metadata that is missing from the cache.
+- Righ clicking on Items you can "Go to OpenAlex Work page" to open the stored Work in your browser. Alternatively, you can enable URL replacement in the plugin settings to have the OpenAlex Work page as the item URL.
+- OPTIONAL: you can set an OpenAlex API key in the plugin settings to improve request allowance.
+- OPTIONAL: you can enable "Correct Arxiv Articles" in the plugin settings to automatically change the item type to preprint and add the DOI when the DOI is missing and the URL specifies it is an arXiv article, for consistency purposes.
 
 ### Usage: Manual update
 
@@ -75,8 +80,8 @@ The main settings can be customized in the Zotero plugin settings panel (Windows
 OpenAlex Work page. For each item with a DOI, it restores the primary resource URL returned by
 Crossref—the same URL field used by Zotero's Crossref translator—and shows live progress plus a
 completion summary. Crossref requests use its single-record endpoint, are paced below the public
-rate limit, and retry temporary failures with backoff. Items without a DOI or Crossref primary URL
-are left unchanged.
+rate limit, and retry temporary failures with backoff. Progress includes an estimated remaining time
+that is recalculated every 10 items. Items without a DOI or Crossref primary URL are left unchanged.
 
 The Metadata Cache section shows the number of cached Works and Authors. Its cleanup action compares
 the database with non-deleted items in all user and group libraries, removes Works no longer present
