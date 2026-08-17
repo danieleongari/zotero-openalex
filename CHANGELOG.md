@@ -1,5 +1,16 @@
 # Changelog
 
+## [10.0.0](https://github.com/danieleongari/zotero-openalex/compare/v9.7.0...v10.0.0) (2026-08-17)
+
+
+### ⚠ BREAKING CHANGES
+
+* update max version for Zotero compatibility ([#37](https://github.com/danieleongari/zotero-openalex/issues/37))
+
+### Features
+
+* update max version for Zotero compatibility ([#37](https://github.com/danieleongari/zotero-openalex/issues/37)) ([072bfbc](https://github.com/danieleongari/zotero-openalex/commit/072bfbc568f06745cc6f9330dd6d747bb29ad61b))
+
 ## [9.7.0](https://github.com/danieleongari/zotero-openalex/compare/v9.6.0...v9.7.0) (2026-07-26)
 
 
