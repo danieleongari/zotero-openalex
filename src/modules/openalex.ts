@@ -1011,30 +1011,65 @@ function showOpenAlexAlert(window: Window, message: string) {
 }
 
 function getSelectedCollectionID() {
-  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedCollection(true);
+  return getSelectedCollections(true)[0];
 }
 
 function getSelectedCollection() {
-  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedCollection();
+  return getSelectedCollections()[0];
 }
 
 function getSelectedLibraryID() {
-  return Zotero.getMainWindow()?.ZoteroPane?.getSelectedLibraryID?.();
+  return getSelectedLibraryIDs()[0];
+}
+
+function getSelectedCollections(asIDs: true): number[];
+function getSelectedCollections(asIDs?: false): Zotero.Collection[];
+function getSelectedCollections(asIDs = false): Array<number | Zotero.Collection> {
+  const pane = Zotero.getMainWindow()?.ZoteroPane;
+  if (!pane) return [];
+
+  if (typeof pane.getSelectedCollections === "function") {
+    return pane.getSelectedCollections(asIDs) || [];
+  }
+
+  const selected = asIDs ? pane.getSelectedCollection?.(true) : pane.getSelectedCollection?.();
+  return selected === undefined || selected === null ? [] : [selected];
+}
+
+function getSelectedLibraryIDs(): number[] {
+  const pane = Zotero.getMainWindow()?.ZoteroPane;
+  if (!pane) return [];
+
+  if (typeof pane.getSelectedLibraryIDs === "function") {
+    return pane.getSelectedLibraryIDs() || [];
+  }
+
+  const selected = pane.getSelectedLibraryID?.();
+  return selected === undefined || selected === null ? [] : [selected];
+}
+
+function getSelectedSavedSearchIDs(): number[] {
+  const pane = Zotero.getMainWindow()?.ZoteroPane;
+  if (!pane) return [];
+
+  if (typeof pane.getSelectedSavedSearches === "function") {
+    return pane.getSelectedSavedSearches(true) || [];
+  }
+
+  const selected = pane.getSelectedSavedSearch?.(true);
+  return typeof selected === "number" ? [selected] : [];
 }
 
 function isLibrarySelectionActive() {
-  const pane = Zotero.getMainWindow()?.ZoteroPane;
-  if (!pane) return false;
-
-  if (pane.getSelectedCollection?.(true)) {
+  if (getSelectedCollections(true).length) {
     return false;
   }
 
-  if (pane.getSelectedSavedSearch?.(true)) {
+  if (getSelectedSavedSearchIDs().length) {
     return false;
   }
 
-  const libraryID = pane.getSelectedLibraryID?.();
+  const libraryID = getSelectedLibraryID();
   return typeof libraryID === "number" && libraryID > 0;
 }
 
