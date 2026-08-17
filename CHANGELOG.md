@@ -1,5 +1,12 @@
 # Changelog
 
+## [10.0.1](https://github.com/danieleongari/zotero-openalex/compare/v10.0.0...v10.0.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* support Zotero 10 collection selection APIs ([#39](https://github.com/danieleongari/zotero-openalex/issues/39)) ([40cc328](https://github.com/danieleongari/zotero-openalex/commit/40cc32873e996019f90d511fb5b21a32c7c0a823))
+
 ## [10.0.0](https://github.com/danieleongari/zotero-openalex/compare/v9.7.0...v10.0.0) (2026-08-17)
 
 
